@@ -3,6 +3,8 @@
 	import plank2 from '#lib/assets/images/plank2.png';
 	import plank3 from '#lib/assets/images/plank3.png';
 	import table from '#lib/assets/images/table.png';
+	import building1 from '#lib/assets/images/building1.png';
+	import building2 from '#lib/assets/images/building2.png';
 	import projectsIcon from '#lib/assets/images/projects-icon.png';
 	import propagandaIcon from '#lib/assets/images/propaganda-icon.png';
 	import helpIcon from '#lib/assets/images/help-icon.png';
@@ -48,39 +50,175 @@
 	}
 
 	const PLANKS = [plank, plank2, plank3];
+	const BUILDINGS = [building1, building2];
 	const SCALE = 4;
-	const WIDTH = 128 * SCALE;
-	const HEIGHT = 16 * SCALE;
+	const WIDTH = 128;
+	const HEIGHT = 16;
+	const SPACING = 96;
+	const MULLION = 3;
+	const RAIL = 5;
+	const REFRACTION = 8;
+	const PARALLAX = 1;
 
 	const seed = 0x5eed;
 
 	function pick(row: number, col: number) {
 		const h = Math.imul(seed ^ (row * 73856093) ^ (col * 19349663), 2654435761) >>> 0;
-		return PLANKS[((h ^ (h >>> 16)) >>> 0) % PLANKS.length];
+		return ((h ^ (h >>> 16)) >>> 0) % PLANKS.length;
 	}
 
+	function random(n: number) {
+		const h = Math.imul(seed ^ Math.imul(n + 1, 2246822519), 2654435761) >>> 0;
+		return ((h ^ (h >>> 16)) >>> 0) / 2 ** 32;
+	}
+
+	let angle = $state(40);
+	let smooth = $state(false);
 	let innerWidth = $state(0);
 	let innerHeight = $state(0);
-	const rows = $derived(Math.ceil(innerHeight / HEIGHT));
-	const cols = $derived(Math.ceil(innerWidth / WIDTH) + 1);
+	let pointer = $state(0);
+	const wall = $derived(Math.round((innerHeight * devicePixelRatio) / 3));
+	let floor: HTMLCanvasElement;
+	let windows: HTMLCanvasElement;
+	let images: HTMLImageElement[] = $state([]);
+	let buildings: HTMLImageElement[] = $state([]);
+
+	function load(src: string) {
+		const image = new Image();
+		image.src = src;
+		return image.decode().then(() => image);
+	}
+
+	function onpointermove(event: PointerEvent) {
+		pointer = (event.clientX / innerWidth) * 2 - 1;
+	}
+
+	$effect(() => {
+		Promise.all(PLANKS.map(load)).then((loaded) => (images = loaded));
+		Promise.all(BUILDINGS.map(load)).then((loaded) => (buildings = loaded));
+	});
+
+	const view = $derived.by(() => {
+		const dpr = devicePixelRatio;
+		const width = Math.round(innerWidth * dpr);
+		const height = Math.round(innerHeight * dpr);
+		const focal = height;
+		const pitch = (angle * Math.PI) / 180;
+		const camera = (focal * Math.sin(pitch)) / (SCALE * dpr);
+
+		const project = (y: number) => {
+			const tilt = Math.atan((y + 0.5 - height / 2) / focal);
+			const ray = pitch + tilt;
+			return { distance: camera / Math.tan(ray), stretch: (camera * Math.cos(tilt)) / Math.sin(ray) / focal };
+		};
+
+		const far = project(wall);
+		const lift = (y: number) => {
+			const tilt = Math.atan((y + 0.5 - height / 2) / focal);
+			const ray = pitch + tilt;
+			return { z: camera - far.distance * Math.tan(ray), depth: (far.distance * Math.cos(tilt)) / Math.cos(ray) };
+		};
+
+		return { width, height, focal, project, far, lift };
+	});
+
+	$effect(() => {
+		if (!images.length) return;
+		const { width, height, project, far } = view;
+		const near = project(height - 1);
+		const flat = document.createElement('canvas');
+		flat.width = Math.ceil(width * far.stretch) + 2;
+		flat.height = Math.ceil(far.distance - near.distance) + 2;
+		const flatContext = flat.getContext('2d')!;
+		for (let row = 0; row * HEIGHT < flat.height; row++) {
+			const offset = Math.round(((row % 5) * WIDTH) / 5) - WIDTH;
+			for (let col = 0; col * WIDTH + offset < flat.width; col++) {
+				flatContext.drawImage(images[pick(row, col)], col * WIDTH + offset, row * HEIGHT);
+			}
+		}
+
+		floor.width = width;
+		floor.height = height;
+		const context = floor.getContext('2d')!;
+		context.imageSmoothingEnabled = smooth;
+		for (let y = wall; y < height; y++) {
+			const { distance, stretch } = project(y);
+			const source = smooth ? far.distance - distance : Math.floor(far.distance - distance);
+			context.drawImage(flat, flat.width / 2 - (width / 2) * stretch, source, width * stretch, 1, 0, y, width, 1);
+		}
+	});
+
+	$effect(() => {
+		if (!buildings.length) return;
+		const { width, focal, lift } = view;
+		const snap = (n: number) => (smooth ? n : Math.round(n));
+		const span = (left: number, right: number, y: number, rows: number) => {
+			const start = snap(left);
+			context.fillRect(start, y, snap(right) - start, rows);
+		};
+
+		windows.width = width;
+		windows.height = wall;
+		const context = windows.getContext('2d')!;
+		context.imageSmoothingEnabled = smooth;
+
+		const unit = focal / lift(wall / 2).depth;
+		const margin = Math.ceil(unit * REFRACTION);
+		const backdrop = document.createElement('canvas');
+		backdrop.width = width + margin * 2;
+		backdrop.height = wall;
+		const backdropContext = backdrop.getContext('2d')!;
+		backdropContext.imageSmoothingEnabled = smooth;
+
+		const sky = backdropContext.createRadialGradient(backdrop.width / 2, wall * 1.5, 0, backdrop.width / 2, wall * 1.5, wall * 2);
+		sky.addColorStop(0, '#a8d8f0');
+		sky.addColorStop(0.75, '#5a8fc8');
+		backdropContext.fillStyle = sky;
+		backdropContext.fillRect(0, 0, backdrop.width, wall);
+
+		const skyline = [];
+		for (let i = 0, x = -unit * 32; x < backdrop.width + unit * 32; i++) {
+			const image = buildings[Math.floor(random(i * 3) * buildings.length)];
+			const size = unit * (0.5 + random(i * 3 + 1) * 0.7);
+			skyline.push({ image, size, x });
+			x += image.width * size * (0.4 + random(i * 3 + 2) * 0.5);
+		}
+		for (const { image, size, x } of skyline.sort((a, b) => a.size - b.size)) {
+			const left = snap(x - pointer * size * PARALLAX);
+			const top = snap(wall - image.height * size);
+			backdropContext.drawImage(image, left, top, snap(left + image.width * size) - left, wall - top);
+		}
+
+		const pane = (focal / lift(wall).depth) * SPACING;
+		for (let k = Math.floor(-width / 2 / pane); width / 2 + k * pane < width; k++) {
+			const left = snap(width / 2 + k * pane);
+			const right = snap(width / 2 + (k + 1) * pane);
+			const shift = snap((random(10000 + k) * 2 - 1) * margin);
+			context.drawImage(backdrop, left + margin + shift, 0, right - left, wall, left, 0, right - left, wall);
+		}
+
+		context.fillStyle = getComputedStyle(windows).getPropertyValue('--island');
+		for (let y = 0; y < wall; y++) {
+			const { z } = lift(y);
+			if (z < RAIL) context.fillRect(0, y, width, 1);
+		}
+		const scale = focal / lift(wall).depth;
+		const half = width / 2 / scale + MULLION;
+		for (let k = Math.ceil(-half / SPACING); k * SPACING <= half; k++) {
+			span(width / 2 + (k * SPACING - MULLION / 2) * scale, width / 2 + (k * SPACING + MULLION / 2) * scale, 0, wall);
+		}
+	});
 </script>
 
-<svelte:window bind:innerWidth bind:innerHeight {onkeydown} />
+<svelte:window bind:innerWidth bind:innerHeight {onkeydown} {onpointermove} />
 
 <svelte:head>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" />
 </svelte:head>
 
 <div class="hq">
-	<div class="floor" style:--width="{WIDTH}px" style:--height="{HEIGHT}px">
-		{#each { length: rows }, row}
-			<div class="row" style:margin-left="{((row % 5) * WIDTH) / 5 - WIDTH}px">
-				{#each { length: cols }, col}
-					<img src={pick(row, col)} alt="" />
-				{/each}
-			</div>
-		{/each}
-	</div>
+	<canvas class="floor" class:smooth bind:this={floor}></canvas>
+	<canvas class="windows" class:smooth style:height="{wall / devicePixelRatio}px" bind:this={windows}></canvas>
 
 	<img class="table" src={table} alt="" />
 
@@ -132,11 +270,6 @@
 		padding: 12px 14px 12px 20px;
 	}
 
-	header.left {
-		flex-direction: row-reverse;
-		padding: 12px 20px 12px 14px;
-	}
-
 	h2 {
 		margin: 0;
 		font-size: 24px;
@@ -167,6 +300,7 @@
 		height: 64px;
 		padding: 0;
 		border: none;
+		border-radius: 6px;
 		background: transparent;
 		color: inherit;
 		cursor: pointer;
@@ -233,22 +367,25 @@
 	.floor {
 		position: fixed;
 		inset: 0;
-		overflow: hidden;
+		width: 100%;
+		height: 100%;
+		image-rendering: pixelated;
 	}
 
-	.row {
-		display: flex;
-		height: var(--height);
+	.windows {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		image-rendering: pixelated;
+	}
+
+	.smooth {
+		image-rendering: auto;
 	}
 
 	img {
 		image-rendering: pixelated;
-	}
-
-	.row img {
-		flex: none;
-		width: var(--width);
-		height: var(--height);
 	}
 
 	.table {
