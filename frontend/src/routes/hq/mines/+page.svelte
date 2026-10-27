@@ -52,7 +52,7 @@
 		--hover: #2b2d30;
 		--text: #dfe1e5;
 		--text-muted: #868a91;
-		--accent: #8bcf86;
+		--accent: #869ecf;
 		--radius: 12px;
 		--radius-small: 6px;
 		position: fixed;

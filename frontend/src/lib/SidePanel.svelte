@@ -1,17 +1,52 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	let { side, children }: { side: 'left' | 'right'; children?: Snippet } = $props();
+	let {
+		side,
+		open = false,
+		children,
+		dialog
+	}: { side: 'left' | 'right'; open?: boolean; children?: Snippet; dialog?: Snippet } = $props();
 
 	const WIDTH = 64;
 	const DROP = WIDTH / Math.sqrt(3);
+	const RADIUS = 6;
+	const DIALOG_WIDTH = 480;
 
 	let height = $state(0);
+
+	function toward([px, py]: number[], [qx, qy]: number[]) {
+		const len = Math.hypot(qx - px, qy - py);
+		return `${px + ((qx - px) * RADIUS) / len} ${py + ((qy - py) * RADIUS) / len}`;
+	}
+
+	const outline = $derived.by(() => {
+		const top = [WIDTH, DROP];
+		const bottom = [WIDTH, height - DROP];
+		return [
+			'M 0 0',
+			`L ${toward(top, [0, 0])} Q ${top.join(' ')} ${toward(top, bottom)}`,
+			`L ${toward(bottom, top)} Q ${bottom.join(' ')} ${toward(bottom, [0, height])}`,
+			`L 0 ${height}`
+		].join(' ');
+	});
 </script>
 
-<div class="panel {side}" style:--width="{WIDTH}px" style:--drop="{DROP}px" bind:clientHeight={height}>
+<aside class="dialog {side}" class:open style:--dialog-width="{DIALOG_WIDTH}px" inert={!open}>
+	{@render dialog?.()}
+</aside>
+
+<div
+	class="panel {side}"
+	class:open
+	style:--width="{WIDTH}px"
+	style:--drop="{DROP}px"
+	style:--dialog-width="{DIALOG_WIDTH}px"
+	bind:clientHeight={height}
+>
 	<svg width={WIDTH} {height}>
-		<polygon points="0,0 {WIDTH},{DROP} {WIDTH},{height - DROP} 0,{height}" />
+		<path class="fill" d="{outline} Z" />
+		<path class="border" d={outline} />
 	</svg>
 	<div class="content">
 		{@render children?.()}
@@ -20,18 +55,25 @@
 
 <style>
 	.panel {
+		--shift: 0px;
 		position: fixed;
 		top: 50%;
 		width: var(--width);
-		transform: translateY(-50%);
+		transition: transform 0.25s ease;
 	}
 
-	.left {
+	.panel.open {
+		--shift: calc(var(--dialog-width) + 8px);
+	}
+
+	.panel.left {
 		left: 0;
+		transform: translate(var(--shift), -50%);
 	}
 
-	.right {
+	.panel.right {
 		right: 0;
+		transform: translate(calc(-1 * var(--shift)), -50%);
 	}
 
 	svg {
@@ -44,10 +86,14 @@
 		transform: scaleX(-1);
 	}
 
-	polygon {
+	.fill {
 		fill: var(--island);
-		stroke: var(--island-border);
-		stroke-width: 1;
+	}
+
+	.border {
+		fill: none;
+		stroke: #0e0f10;
+		stroke-width: 2;
 	}
 
 	.content {
@@ -56,5 +102,34 @@
 		flex-direction: column;
 		gap: 16px;
 		padding: calc(var(--drop) + 16px) 0;
+	}
+
+	.dialog {
+		position: fixed;
+		top: 8px;
+		bottom: 8px;
+		box-sizing: border-box;
+		width: var(--dialog-width);
+		overflow: auto;
+		border: 2px solid #0e0f10;
+		border-radius: 6px;
+		background: var(--island);
+		transition: transform 0.25s ease;
+	}
+
+	.dialog.left {
+		left: 8px;
+		border-right: none;
+		transform: translateX(calc(-100% - 8px));
+	}
+
+	.dialog.right {
+		right: 8px;
+		border-left: none;
+		transform: translateX(calc(100% + 8px));
+	}
+
+	.dialog.open {
+		transform: none;
 	}
 </style>

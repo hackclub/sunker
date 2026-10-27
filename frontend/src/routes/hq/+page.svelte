@@ -9,27 +9,50 @@
 	import chatIcon from '#lib/assets/images/chat-icon.png';
 	import battleIcon from '#lib/assets/images/battle-icon.png';
 	import profileIcon from '#lib/assets/images/profile.png';
+	import xIcon from '#lib/assets/images/x-icon.png';
 	import SidePanel from '#lib/SidePanel.svelte';
+	import Projects from '#lib/hq/Projects.svelte';
+	import Propaganda from '#lib/hq/Propaganda.svelte';
+	import Help from '#lib/hq/Help.svelte';
+	import Chat from '#lib/hq/Chat.svelte';
+	import Missions from '#lib/hq/Missions.svelte';
+	import Profile from '#lib/hq/Profile.svelte';
+	import type { Component } from 'svelte';
 
-	const panels: Record<'left' | 'right', { label: string; icon: string; disabled: boolean; dot: boolean }[]> = $state({
+	type Side = 'left' | 'right';
+	type Section = { label: string; icon: string; component: Component; disabled: boolean; dot: boolean };
+
+	const panels: Record<Side, Section[]> = $state({
 		left: [
-			{ label: 'Projects', icon: projectsIcon, disabled: false, dot: false },
-			{ label: 'Propaganda', icon: propagandaIcon, disabled: false, dot: false },
-			{ label: 'Help', icon: helpIcon, disabled: false, dot: false }
+			{ label: 'Projects', icon: projectsIcon, component: Projects, disabled: false, dot: false },
+			{ label: 'Propaganda', icon: propagandaIcon, component: Propaganda, disabled: false, dot: false },
+			{ label: 'Help', icon: helpIcon, component: Help, disabled: false, dot: false }
 		],
 		right: [
-			{ label: 'Chat', icon: chatIcon, disabled: false, dot: false },
-			{ label: 'Missions', icon: battleIcon, disabled: false, dot: false },
-			{ label: 'Profile', icon: profileIcon, disabled: false, dot: false }
+			{ label: 'Chat', icon: chatIcon, component: Chat, disabled: false, dot: false },
+			{ label: 'Missions', icon: battleIcon, component: Missions, disabled: false, dot: false },
+			{ label: 'Profile', icon: profileIcon, component: Profile, disabled: false, dot: false }
 		]
 	});
+
+	const open: Record<Side, boolean> = $state({ left: false, right: false });
+	const active: Record<Side, number> = $state({ left: 0, right: 0 });
+
+	function toggle(side: Side, index: number) {
+		open[side] = !(open[side] && active[side] === index);
+		active[side] = index;
+	}
+
+	function onkeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') open.left = open.right = false;
+	}
 
 	const PLANKS = [plank, plank2, plank3];
 	const SCALE = 4;
 	const WIDTH = 128 * SCALE;
 	const HEIGHT = 16 * SCALE;
 
-	const seed = Math.floor(Math.random() * 2 ** 32);
+	const seed = 0x5eed;
 
 	function pick(row: number, col: number) {
 		const h = Math.imul(seed ^ (row * 73856093) ^ (col * 19349663), 2654435761) >>> 0;
@@ -42,10 +65,10 @@
 	const cols = $derived(Math.ceil(innerWidth / WIDTH) + 1);
 </script>
 
-<svelte:window bind:innerWidth bind:innerHeight />
+<svelte:window bind:innerWidth bind:innerHeight {onkeydown} />
 
 <svelte:head>
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" />
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" />
 </svelte:head>
 
 <div class="hq">
@@ -62,14 +85,30 @@
 	<img class="table" src={table} alt="" />
 
 	{#each ['left', 'right'] as const as side}
-		<SidePanel {side}>
-			{#each panels[side] as { label, icon, disabled, dot }}
-				<button aria-label={label} {disabled}>
+		{@const section = panels[side][active[side]]}
+		<SidePanel {side} open={open[side]}>
+			{#each panels[side] as { label, icon, disabled, dot }, i}
+				<button
+					aria-label={label}
+					aria-expanded={open[side] && active[side] === i}
+					tabindex={i * 2 + (side === 'left' ? 1 : 2)}
+					{disabled}
+					onclick={() => toggle(side, i)}
+				>
 					<img src={icon} alt="" />
 					{#if dot}<span class="dot"></span>{/if}
 					<span class="tip {side}">{label}</span>
 				</button>
 			{/each}
+			{#snippet dialog()}
+				<header class={side}>
+					<h2>{section.label}</h2>
+					<button class="close" aria-label="Close" onclick={() => (open[side] = false)}>
+						<img src={xIcon} alt="" />
+					</button>
+				</header>
+				<div class="body"><section.component /></div>
+			{/snippet}
 		</SidePanel>
 	{/each}
 </div>
@@ -80,9 +119,44 @@
 		--island-border: #2b2d30;
 		--hover: #2b2d30;
 		--text: #dfe1e5;
-		--accent: #8bcf86;
+		--accent: #869ecf;
 		color: var(--text);
 		color-scheme: dark;
+		font: 13px 'Inter', sans-serif;
+	}
+
+	header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12px 14px 12px 20px;
+	}
+
+	header.left {
+		flex-direction: row-reverse;
+		padding: 12px 20px 12px 14px;
+	}
+
+	h2 {
+		margin: 0;
+		font-size: 24px;
+		line-height: 24px;
+		font-weight: 500;
+	}
+
+	.close {
+		width: 24px;
+		height: 24px;
+		border-radius: 6px;
+	}
+
+	.close img {
+		width: 24px;
+		height: 24px;
+	}
+
+	.body {
+		padding: 0 20px 16px;
 	}
 
 	button {
@@ -110,7 +184,6 @@
 		border: 1px solid #393b40;
 		border-radius: 6px;
 		background: var(--island);
-		font: 13px 'Inter', sans-serif;
 		white-space: nowrap;
 		transform: translateY(-50%);
 		pointer-events: none;
