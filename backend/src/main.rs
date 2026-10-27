@@ -2,10 +2,16 @@ use actix_files::{Files, NamedFile};
 use actix_web::{get, web, App, HttpServer, Responder};
 
 const FRONTEND_DIR: &str = "../frontend/build";
+const MAP_FILE: &str = "map.json";
 
 #[get("/api/health")]
 async fn health() -> impl Responder {
     web::Json(serde_json::json!({ "status": "ok" }))
+}
+
+#[get("/api/map")]
+async fn map() -> std::io::Result<NamedFile> {
+    NamedFile::open(MAP_FILE)
 }
 
 #[actix_web::main]
@@ -16,7 +22,7 @@ async fn main() -> std::io::Result<()> {
         .unwrap_or(4400);
 
     HttpServer::new(|| {
-        App::new().service(health).service(
+        App::new().service(health).service(map).service(
             Files::new("/", FRONTEND_DIR)
                 .index_file("index.html")
                 .default_handler(
