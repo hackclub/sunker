@@ -11,18 +11,18 @@
 	import profileIcon from '#lib/assets/images/profile.png';
 	import SidePanel from '#lib/SidePanel.svelte';
 
-	const PANELS = {
+	const panels: Record<'left' | 'right', { label: string; icon: string; disabled: boolean; dot: boolean }[]> = $state({
 		left: [
-			{ label: 'Projects', icon: projectsIcon },
-			{ label: 'Propaganda', icon: propagandaIcon },
-			{ label: 'Help', icon: helpIcon }
+			{ label: 'Projects', icon: projectsIcon, disabled: false, dot: false },
+			{ label: 'Propaganda', icon: propagandaIcon, disabled: false, dot: false },
+			{ label: 'Help', icon: helpIcon, disabled: false, dot: false }
 		],
 		right: [
-			{ label: 'Chat', icon: chatIcon },
-			{ label: 'Missions', icon: battleIcon },
-			{ label: 'Profile', icon: profileIcon }
+			{ label: 'Chat', icon: chatIcon, disabled: false, dot: false },
+			{ label: 'Missions', icon: battleIcon, disabled: false, dot: false },
+			{ label: 'Profile', icon: profileIcon, disabled: false, dot: false }
 		]
-	};
+	});
 
 	const PLANKS = [plank, plank2, plank3];
 	const SCALE = 4;
@@ -63,9 +63,10 @@
 
 	{#each ['left', 'right'] as const as side}
 		<SidePanel {side}>
-			{#each PANELS[side] as { label, icon }}
-				<button aria-label={label}>
+			{#each panels[side] as { label, icon, disabled, dot }}
+				<button aria-label={label} {disabled}>
 					<img src={icon} alt="" />
+					{#if dot}<span class="dot"></span>{/if}
 					<span class="tip {side}">{label}</span>
 				</button>
 			{/each}
@@ -129,8 +130,26 @@
 		visibility: visible;
 	}
 
-	button:hover {
+	button:hover:enabled {
 		background: var(--hover);
+	}
+
+	button:disabled {
+		cursor: default;
+	}
+
+	button:disabled img {
+		opacity: 0.3;
+	}
+
+	.dot {
+		position: absolute;
+		top: 8px;
+		left: 8px;
+		width: 20px;
+		height: 20px;
+		border-radius: 50%;
+		background: #3574f0;
 	}
 
 	button:focus-visible {
