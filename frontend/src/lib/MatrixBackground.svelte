@@ -2,6 +2,8 @@
 	import { untrack } from 'svelte';
 	import { RING_CHARSETS, RING_COUNT, ringGeometry, ringsState } from '#lib/rings.svelte.js';
 
+	let { color = '139 207 134' }: { color?: string } = $props();
+
 	const FONT = "14px 'JetBrains Mono', monospace";
 	let LINE = 16;
 	const FPS = 20;
@@ -249,7 +251,7 @@
 	});
 </script>
 
-<div class="matrix" bind:this={container} aria-hidden="true"></div>
+<div class="matrix" style:--rgb={color} bind:this={container} aria-hidden="true"></div>
 
 <style>
 	.matrix {
@@ -323,8 +325,8 @@
 	}
 
 	.matrix :global(p) {
-		--base: rgb(139 207 134 / calc(0.05 * (1 - var(--dim))));
-		--spark: rgb(139 207 134 / calc(0.4 * (1 - var(--dim))));
+		--base: rgb(var(--rgb) / calc(0.05 * (1 - var(--dim))));
+		--spark: rgb(var(--rgb) / calc(0.4 * (1 - var(--dim))));
 		position: absolute;
 		inset: 0;
 		margin: 0;
