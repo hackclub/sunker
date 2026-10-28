@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { BASES, NAMES } from '#lib/bases.js';
+	import { amount, describe } from '#lib/effects.js';
 	import { CONTOUR, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
 	import { HEIGHT, WIDTH, bounds, center, neighbours, place, type PlacedTile } from '#lib/map.js';
 	import { perlin } from '#lib/noise.js';
@@ -24,7 +25,9 @@
 	let ratio = $state(1);
 	let canvas: HTMLCanvasElement;
 	let gl: Renderer;
-	let hovered: PlacedTile | null = null;
+	let hovered = $state.raw<PlacedTile | null>(null);
+	let pointer = $state({ x: 0, y: 0 });
+	const card = $derived(hovered && describe(hovered.tile));
 
 	const tiles = $derived(place(data.map));
 	const box = $derived(bounds(tiles));
@@ -199,6 +202,7 @@
 
 	function onpointermove(event: PointerEvent) {
 		hovered = pick(event.clientX, event.clientY);
+		pointer = { x: event.clientX, y: event.clientY };
 	}
 
 	function noise(x: number, y: number, t: number) {
@@ -279,8 +283,27 @@
 
 <svelte:window bind:innerWidth bind:innerHeight />
 
+<svelte:head>
+	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" />
+</svelte:head>
+
 <div class="map" role="presentation" {onpointermove} onpointerleave={() => (hovered = null)}>
 	<canvas bind:this={canvas}></canvas>
+	{#if card}
+		<div class="card" class:flipped={pointer.x > innerWidth - 280} style:left="{pointer.x}px" style:top="{pointer.y}px">
+			<h2>{card.title}</h2>
+			{#if card.effects.length}
+				<ul>
+					{#each card.effects as effect}
+						<li class:positive={effect.positive}>
+							<span>{effect.name}</span>
+							{#if effect.value !== undefined}<span>{amount(effect.value)}</span>{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -296,5 +319,47 @@
 		inset: 0;
 		width: 100%;
 		height: 100%;
+	}
+
+	.card {
+		position: absolute;
+		min-width: 160px;
+		max-width: 260px;
+		padding: 10px 14px;
+		border: 1px solid #2b2d30;
+		border-radius: 12px;
+		background: #1e1f22;
+		color: #dfe1e5;
+		font: 13px 'Inter', sans-serif;
+		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+		pointer-events: none;
+		transform: translate(16px, 16px);
+	}
+
+	.card.flipped {
+		transform: translate(calc(-100% - 16px), 16px);
+	}
+
+	h2 {
+		margin: 0;
+		font-size: 16px;
+		font-weight: 500;
+	}
+
+	ul {
+		margin: 8px 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	li {
+		display: flex;
+		justify-content: space-between;
+		gap: 16px;
+		color: #e06c6c;
+	}
+
+	li.positive {
+		color: #6cc47a;
 	}
 </style>
