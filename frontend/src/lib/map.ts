@@ -1,7 +1,8 @@
 export interface Tile {
 	height?: number;
-	top?: string;
 	base?: string;
+	side?: string;
+	variant?: string;
 }
 
 export interface HexMap {
@@ -16,7 +17,7 @@ export interface PlacedTile {
 	y: number;
 }
 
-export const DEFAULT_TILE: Required<Tile> = { height: 0.5, top: '#222b3d', base: '#141925' };
+export const DEFAULT_TILE: Required<Tile> = { height: 0.5, base: 'plain', side: '#141925', variant: '' };
 
 export const SIZE = 1;
 export const WIDTH = Math.sqrt(3) * SIZE;
@@ -28,6 +29,18 @@ export const CORNERS = Array.from({ length: 6 }, (_, i) => {
 });
 
 export const FRONT = [1, 2, 3, 4].map((i) => CORNERS[i]);
+
+export function neighbours(row: number, col: number) {
+	const odd = row & 1;
+	return [
+		[row - 1, col + odd],
+		[row, col + 1],
+		[row + 1, col + odd],
+		[row + 1, col + odd - 1],
+		[row, col - 1],
+		[row - 1, col + odd - 1]
+	];
+}
 
 export function center(row: number, col: number) {
 	return { x: WIDTH * (col + (row & 1) / 2), y: HEIGHT * 0.75 * row };
