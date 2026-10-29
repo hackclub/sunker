@@ -2,17 +2,12 @@
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
 	import { CACTUS, CONTOUR, RAMP_STRIDE, TREE, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
-	import { CORNERS, HEIGHT, WIDTH, bounds, center, neighbours, place, type PlacedTile } from '#lib/map.js';
+	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile } from '#lib/map.js';
 	import { perlin } from '#lib/noise.js';
+	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid } from '#lib/view.js';
 
-	let { data } = $props();
+	let { map, table = false }: { map: HexMap; table?: boolean } = $props();
 
-	const PADDING = 4;
-	const OVERSCAN = 1.5;
-	const TILT = 20;
-	const PERSPECTIVE = 1200;
-	const LIFT = Math.tan((TILT * Math.PI) / 180);
-	const BACKGROUND = 0.9;
 	const LEVEL = 0.1;
 	const GRID = [...rgb('#0e0f10'), 0.03];
 	const GROVE = 0.4;
@@ -30,22 +25,10 @@
 	let pointer = $state({ x: 0, y: 0 });
 	const card = $derived(hovered && describe(hovered.tile));
 
-	const tiles = $derived(place(data.map));
-	const box = $derived(bounds(tiles));
+	const tiles = $derived(place(map));
 	const ceiling = $derived(Math.min(...tiles.map((t) => t.tile.height)) * BACKGROUND);
 
-	const plane = $derived.by(() => {
-		const width = innerWidth * OVERSCAN;
-		const height = innerHeight * OVERSCAN;
-		const scale = Math.min(innerWidth / (box.width + PADDING * 2), innerHeight / (box.height + PADDING * 2));
-		return {
-			width,
-			height,
-			scale,
-			x: width / 2 - (box.left + box.width / 2) * scale,
-			y: height / 2 - (box.top + box.height / 2) * scale
-		};
-	});
+	const plane = $derived(frame(tiles, innerWidth, innerHeight));
 
 	const placed = $derived(new Map(tiles.map((t) => [`${t.row},${t.col}`, t])));
 	const groups = $derived.by(() => {
@@ -280,13 +263,12 @@
 	});
 
 	const field = $derived.by(() => {
-		const { width, height, scale, x, y } = plane;
-		const rows = [Math.floor(-y / scale / (HEIGHT * 0.75)) - 1, Math.ceil((height - y) / scale / (HEIGHT * 0.75)) + 2];
-		const cols = [Math.floor(-x / scale / WIDTH) - 1, Math.ceil((width - x) / scale / WIDTH) + 1];
+		const { rows, cols } = grid(plane);
 		const hexes = [];
 		for (let row = rows[0]; row <= rows[1]; row++) {
 			for (let col = cols[0]; col <= cols[1]; col++) {
-				hexes.push({ ...center(row, col), placed: placed.get(`${row},${col}`) });
+				const here = placed.get(`${row},${col}`);
+				hexes.push({ ...center(row, col), placed: here });
 			}
 		}
 		return hexes;
@@ -318,8 +300,12 @@
 		const n =
 			0.65 * perlin(x * 0.07 + t * 0.012, y * 0.07 + t * 0.006) +
 			0.35 * perlin(x * 0.16 - t * 0.008 + 31, y * 0.16 + t * 0.01 + 17);
-		return Math.min(1, Math.max(0, n * 0.8 + 0.5));
+		return Math.min(1, Math.max(0, n * 1.4 + 0.5));
 	}
+
+	$effect(() => {
+		if (table) hovered = null;
+	});
 
 	$effect(() => {
 		const query = matchMedia(`(resolution: ${ratio}dppx)`);
@@ -366,7 +352,7 @@
 			if (!gl.animated && drawn === hovered) return;
 			const still = drawn !== undefined && !gl.animated;
 			drawn = hovered;
-			const t = gl.animated ? time / 650 : 0;
+			const t = gl.animated ? time / 80 : 0;
 			hexes.forEach((hex, i) => {
 				const o = i * STRIDE;
 				if (hex.placed) {
@@ -375,7 +361,7 @@
 				}
 				if (still) return;
 				const n = noise(hex.x, hex.y, t);
-				const v = (13 + n * 6) / 255;
+				const v = (20 + n * 22) / 255;
 				const b = v * 0.7;
 				data[o + 2] = n * top * LIFT;
 				data[o + 3] = v;
@@ -398,7 +384,7 @@
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" />
 </svelte:head>
 
-<div class="map" role="presentation" {onpointermove} onpointerleave={() => (hovered = null)}>
+<div class="map" class:table role="presentation" onpointermove={table ? undefined : onpointermove} onpointerleave={() => (hovered = null)}>
 	<canvas bind:this={canvas}></canvas>
 	{#if card}
 		<div class="card" class:flipped={pointer.x > innerWidth - 280} style:left="{pointer.x}px" style:top="{pointer.y}px">
@@ -423,6 +409,10 @@
 		inset: 0;
 		overflow: hidden;
 		background: #0e0f10;
+	}
+
+	.table {
+		pointer-events: none;
 	}
 
 	canvas {

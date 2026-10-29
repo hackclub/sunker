@@ -58,6 +58,7 @@
 		--shift: 0px;
 		position: fixed;
 		top: 50%;
+		z-index: 20;
 		width: var(--width);
 		transition: transform 0.25s ease;
 	}
@@ -108,6 +109,7 @@
 		position: fixed;
 		top: 8px;
 		bottom: 8px;
+		z-index: 20;
 		box-sizing: border-box;
 		width: var(--dialog-width);
 		overflow: auto;
