@@ -18,7 +18,7 @@ export interface PlacedTile {
 	y: number;
 }
 
-export const DEFAULT_TILE: Required<Tile> = { height: 0.5, base: 'plain', side: '#2e2822', variants: [], flow: -1 };
+export const DEFAULT_TILE: Required<Tile> = { height: 0.5, base: 'plain', side: '#6b4a34', variants: [], flow: -1 };
 
 export const SIZE = 1;
 export const WIDTH = Math.sqrt(3) * SIZE;

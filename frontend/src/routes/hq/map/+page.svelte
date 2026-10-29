@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
-	import { CACTUS, CONTOUR, TREE, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
-	import { HEIGHT, WIDTH, bounds, center, neighbours, place, type PlacedTile } from '#lib/map.js';
+	import { CACTUS, CONTOUR, RAMP_STRIDE, TREE, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
+	import { CORNERS, HEIGHT, WIDTH, bounds, center, neighbours, place, type PlacedTile } from '#lib/map.js';
 	import { perlin } from '#lib/noise.js';
 
 	let { data } = $props();
@@ -16,7 +16,7 @@
 	const LEVEL = 0.1;
 	const GRID = [...rgb('#0e0f10'), 0.03];
 	const GROVE = 0.4;
-	const VARIANTS = ['', 'highway', 'street', 'mine', 'beach', 'farmland'];
+	const VARIANTS = ['', 'highway', 'street', 'mine', 'beach', 'farmland', 'sunker'];
 	const ROADS = ['highway', 'street'];
 	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
@@ -112,12 +112,16 @@
 		if (!variant) return 0;
 		const arms = linked(row, col);
 		const around = neighbours(row, col);
+		const corner = arms.find((i) => arms.includes((i + 1) % 6) && [[row, col], around[i], around[(i + 1) % 6]].every(([r, c]) => linked(r, c).length >= 3));
+		if (corner !== undefined) return (9 + ((corner + 1) % 6)) | (variant === 'highway' ? 128 : 0);
 		const spoke = (i: number, k: number) => [hub(row, col), hub(...(around[i] as [number, number])), hub(...(around[k] as [number, number]))].filter(Boolean).length === 1;
+		const kind = (i: number) => roadOf(placed.get(`${around[i][0]},${around[i][1]}`)?.tile);
+		const pull = (i: number, k: number) => arms.includes(k) && !spoke(i, k) && (variant !== 'highway' || (kind(i) === 'highway' && kind(k) === 'highway'));
 		let [x, y] = [0, 0];
 		const lone = [];
 		for (const i of arms) {
 			const [previous, next] = [(i + 5) % 6, (i + 1) % 6];
-			if ((arms.includes(previous) && !spoke(i, previous)) || (arms.includes(next) && !spoke(i, next))) [x, y] = [x + MIDPOINTS[i][0] / 2, y + MIDPOINTS[i][1] / 2];
+			if (pull(i, previous) || pull(i, next)) [x, y] = [x + MIDPOINTS[i][0] / 2, y + MIDPOINTS[i][1] / 2];
 			else if (i % 3 !== 1 && sway(...(around[i] as [number, number]))) lone.push(i);
 		}
 		if (through(row, col)) [x, y] = [through(row, col), 0];
@@ -138,6 +142,39 @@
 		let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(k, 1442695041);
 		h = Math.imul(h ^ (h >>> 13), 1274126177);
 		return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+	}
+
+	function spot(bits: number) {
+		return (bits & 15) > 8 ? CORNERS[(bits & 15) - 9] : [((bits & 15) - 4) * 0.2165064, (((bits >> 4) & 7) - 2) * 0.375];
+	}
+
+	function junction(tile: PlacedTile) {
+		const bits = node(tile.row, tile.col);
+		const [x, y] = spot(bits);
+		return [tile.x + x, tile.y + y];
+	}
+
+	const paths = $derived.by(() => {
+		const found: number[][] = [];
+		for (const tile of tiles) {
+			if (!roadOf(tile.tile)) continue;
+			const a = junction(tile);
+			const width = roadOf(tile.tile) === 'highway' ? 0.36 : 0.2;
+			found.push([...a, ...a, width]);
+			for (const [r, c] of neighbours(tile.row, tile.col)) {
+				const other = placed.get(`${r},${c}`);
+				if (other && roadOf(other.tile)) found.push([...a, ...junction(other), roadOf(tile.tile) === 'highway' && roadOf(other.tile) === 'highway' ? 0.36 : 0.2]);
+			}
+		}
+		return found;
+	});
+
+	function clear(x: number, y: number) {
+		return paths.every(([ax, ay, bx, by, width]) => {
+			const [dx, dy] = [bx - ax, by - ay];
+			const t = dx || dy ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy))) : 0;
+			return Math.hypot(x - ax - dx * t, y - ay - dy * t) > width + 0.15;
+		});
 	}
 
 	const trees = $derived.by(() => {
@@ -176,9 +213,70 @@
 				}
 			}
 		}
-		const data = new Float32Array(found.length * TREE_STRIDE);
-		found.sort((a, b) => a[1] - b[1]).forEach((tree, i) => data.set(tree, i * TREE_STRIDE));
+		const kept = found.filter(([x, y]) => clear(x, y));
+		const data = new Float32Array(kept.length * TREE_STRIDE);
+		kept.sort((a, b) => a[1] - b[1]).forEach((tree, i) => data.set(tree, i * TREE_STRIDE));
 		return data;
+	});
+
+	function dropped(a: PlacedTile, b: PlacedTile, c: PlacedTile) {
+		const [p, q, r] = [a, b, c].map(junction);
+		const hubs = [a, b, c].map((t) => hub(t.row, t.col));
+		const gap = (u: number[], v: number[]) => Math.hypot(u[0] - v[0], u[1] - v[1]);
+		return hubs.filter(Boolean).length === 1 ? hubs[2] : gap(p, q) > gap(p, r) + 0.01 && gap(p, q) > gap(q, r) + 0.01;
+	}
+
+	function links(tile: PlacedTile) {
+		if (!roadOf(tile.tile)) return [];
+		const around = neighbours(tile.row, tile.col).map(([r, c]) => placed.get(`${r},${c}`));
+		return around.flatMap((other, i) => {
+			if (!other || !roadOf(other.tile)) return [];
+			const sides = [around[(i + 1) % 6], around[(i + 5) % 6]];
+			return sides.some((side) => side && roadOf(side.tile) && dropped(tile, other, side)) ? [] : [[i, other] as const];
+		});
+	}
+
+	function slopes(tile: PlacedTile) {
+		if (roadOf(tile.tile)) return links(tile).filter(([, other]) => other.tile.height !== tile.tile.height);
+		const around = neighbours(tile.row, tile.col).map(([r, c]) => placed.get(`${r},${c}`));
+		return around.flatMap((other, i) => {
+			const next = around[(i + 1) % 6];
+			return other && next && roadOf(other.tile) && roadOf(next.tile) && other.tile.height !== next.tile.height ? [[i, other] as const] : [];
+		});
+	}
+
+	const ramps = $derived.by(() => {
+		const found: number[] = [];
+		for (const tile of tiles) {
+			for (const [, other] of links(tile)) {
+				const level = other.tile.height === tile.tile.height;
+				if (other.tile.height > tile.tile.height || (level && (roadOf(tile.tile) !== 'highway' || roadOf(other.tile) !== 'highway' || other.row * 1000 + other.col < tile.row * 1000 + tile.col))) continue;
+				const [a, b] = [junction(tile), junction(other)];
+				found.push(...a, tile.tile.height * LIFT, ...b, other.tile.height * LIFT, (roadOf(tile.tile) === 'highway' ? 1 : 0) + (roadOf(other.tile) === 'highway' ? 2 : 0), 0, 0);
+			}
+		}
+		const corners = new Map<string, { at: number[]; lift: number; arms: [number[], boolean][] }>();
+		for (const tile of tiles) {
+			if ((node(tile.row, tile.col) & 15) <= 8) continue;
+			const at = junction(tile);
+			const key = at.map((v) => v.toFixed(3)).join();
+			const corner = corners.get(key) ?? { at, lift: tile.tile.height * LIFT, arms: [] };
+			corners.set(key, corner);
+			for (const [, other] of links(tile)) {
+				const b = junction(other);
+				if (Math.hypot(b[0] - at[0], b[1] - at[1]) > 0.01) corner.arms.push([b, roadOf(tile.tile) === 'highway' && roadOf(other.tile) === 'highway']);
+			}
+		}
+		for (const { at, lift, arms } of corners.values()) {
+			const angle = ([[x, y]]: [number[], boolean]) => Math.atan2(y - at[1], x - at[0]);
+			arms.sort((a, b) => angle(a) - angle(b));
+			arms.forEach((first, k) => {
+				const second = arms[(k + 1) % arms.length];
+				const gap = (angle(second) - angle(first) + Math.PI * 2) % (Math.PI * 2);
+				if (arms.length > 1 && gap < Math.PI) found.push(...at, lift, ...first[0], lift, 4 + (first[1] ? 1 : 0) + (second[1] ? 2 : 0), ...second[0]);
+			});
+		}
+		return new Float32Array(found);
 	});
 
 	const field = $derived.by(() => {
@@ -242,6 +340,7 @@
 			{ perspective: PERSPECTIVE, tilt: TILT }
 		);
 		gl.plant(trees);
+		gl.pave(ramps);
 
 		const data = new Float32Array(hexes.length * STRIDE);
 		hexes.forEach((hex, i) => {
@@ -251,9 +350,9 @@
 				const { tile } = hex.placed;
 				const base = tile.base in BASES ? tile.base : 'plain';
 				data.set([tile.height * LIFT, ...rgb(BASES[base].flat), ...rgb(tile.side)], o + 2);
-				data[o + 14] = NAMES.indexOf(base) + 1 + 100 * (tile.flow + 1) + tile.variants.map((variant) => VARIANTS.indexOf(variant)).filter((index) => index > 0).slice(0, 3).reduce((sum, index, k) => sum + index * 1000 * 8 ** k, 0);
+				data[o + 14] = NAMES.indexOf(base) + 1 + tile.variants.map((variant) => VARIANTS.indexOf(variant)).filter((index) => index > 0).slice(0, 3).reduce((sum, index, k) => sum + index * 1000 * 8 ** k, 0);
 				data[o + 15] = edges(hex.placed) | roads(hex.placed);
-				data[o + 16] = neighbours(hex.placed.row, hex.placed.col).reduce((bits, [r, c], k) => bits | (((placed.get(`${r},${c}`)?.tile.flow ?? -1) + 1) << (3 * k)), 0);
+				data[o + 16] = slopes(hex.placed).reduce((bits, [i]) => bits | (1 << i), 0);
 				if (roadOf(tile) || linked(hex.placed.row, hex.placed.col).length) data.set(nodes(hex.placed), o + 9);
 			} else {
 				data.set(GRID, o + 9);

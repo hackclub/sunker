@@ -12,6 +12,7 @@ export const STRIDE = 17;
 export const THIN = 1;
 export const CONTOUR = 2;
 export const TREE_STRIDE = 6;
+export const RAMP_STRIDE = 9;
 
 const SPRITES = [
 	{ src: mountain, size: [256, 256], anchor: [112, 200], unit: 1.9 / 256, flat: true },
@@ -32,7 +33,7 @@ const vec2 SPRITE_ANCHORS[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES
 const float SPRITE_UNITS[${SPRITES.length}] = float[${SPRITES.length}](${SPRITES.map(({ unit }) => float(unit))});
 const bool SPRITE_FLAT[${SPRITES.length}] = bool[${SPRITES.length}](${SPRITES.map(({ flat }) => flat)});`;
 
-const BORDERS: Record<number, { width: number; color: string }> = { [THIN]: { width: 0.015, color: 'rgb(180 184 191 / 0.4)' }, [CONTOUR]: { width: 0.08, color: 'rgb(255 255 255)' } };
+const BORDERS: Record<number, { width: number; color: string }> = { [THIN]: { width: 0.015, color: 'rgb(255 248 228 / 0.4)' }, [CONTOUR]: { width: 0.08, color: 'rgb(255 248 228)' } };
 
 type Screen = { width: number; height: number; ratio: number };
 type Plane = { width: number; height: number; scale: number; x: number; y: number };
@@ -42,6 +43,7 @@ export interface Renderer {
 	animated: boolean;
 	resize(screen: Screen, plane: Plane, camera: Camera): void;
 	plant(trees: Float32Array): void;
+	pave(ramps: Float32Array): void;
 	draw(data: Float32Array, time?: number): void;
 }
 
@@ -70,7 +72,7 @@ in vec4 i_outline;
 in float i_highlight;
 in float i_surface;
 in float i_edges;
-in float i_flows;
+in float i_slopes;
 ${PROJECT}
 out vec2 v_local;
 out float v_kind;
@@ -83,7 +85,7 @@ out float v_highlight;
 out vec2 v_world;
 flat out float v_surface;
 flat out float v_edges;
-flat out float v_flows;
+flat out float v_slopes;
 flat out vec3 v_nodes;
 void main() {
 	vec2 position = a_kind > 0.5 ? a_position * 1.005 : a_position;
@@ -99,7 +101,7 @@ void main() {
 	v_world = i_center + position;
 	v_surface = i_surface;
 	v_edges = i_edges;
-	v_flows = i_flows;
+	v_slopes = i_slopes;
 	v_nodes = i_outline.rgb;
 }`;
 
@@ -119,14 +121,14 @@ in float v_highlight;
 in vec2 v_world;
 flat in float v_surface;
 flat in float v_edges;
-flat in float v_flows;
+flat in float v_slopes;
 flat in vec3 v_nodes;
 out vec4 color;
 const vec3 SEAM = vec3(14.0, 15.0, 16.0) / 255.0;
 const vec3 HIGHLIGHT = vec3(134.0, 158.0, 207.0) / 255.0;
-const vec3 THIN = vec3(180.0, 184.0, 191.0) / 255.0;
-const vec3 ASPHALT = vec3(54.0, 56.0, 59.0) / 255.0;
-const vec3 PAINT = vec3(238.0, 241.0, 146.0) / 255.0;
+const vec3 THIN = vec3(255.0, 248.0, 228.0) / 255.0;
+const vec3 ASPHALT = vec3(72.0, 70.0, 86.0) / 255.0;
+const vec3 PAINT = vec3(255.0, 222.0, 112.0) / 255.0;
 const vec2 NORMALS[6] = vec2[6](vec2(0.5, -0.8660254), vec2(1.0, 0.0), vec2(0.5, 0.8660254), vec2(-0.5, 0.8660254), vec2(-1.0, 0.0), vec2(-0.5, -0.8660254));
 vec3 dither(vec3 rgb) {
 	float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
@@ -140,6 +142,16 @@ const vec2 HEX[6] = vec2[6](vec2(0.0, -1.0), vec2(0.8660254, -0.5), vec2(0.86602
 float segment(vec2 p, vec2 a, vec2 b) {
 	vec2 ab = b - a;
 	return length(p - a - ab * clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
+}
+vec2 lane(vec2 p, vec2 a, vec2 b) {
+	vec2 ab = b - a;
+	float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+	return vec2(length(p - a - ab * t), t);
+}
+void pave(inout float road, inout float line, vec2 p, vec2 a, vec2 b, bool wa, bool wb) {
+	vec2 l = lane(p, a, b);
+	road = min(road, l.x - (wa && wb ? 0.36 : wa || wb ? mix(0.36, 0.2, smoothstep(0.0, 0.3, wa ? l.y : 1.0 - l.y)) : 0.2));
+	if (wa && wb) line = min(line, l.x);
 }
 bool longest(vec2 a, vec2 b, vec2 c) {
 	return distance(a, b) > distance(a, c) + 0.01 && distance(a, b) > distance(b, c) + 0.01;
@@ -194,18 +206,74 @@ vec3 mine(vec2 p, float y, vec3 rgb, int bits) {
 	return result;
 }
 vec3 farmland(vec2 w) {
-	vec2 d = vec2(0.9397, 0.342);
-	vec2 n = vec2(-d.y, d.x);
-	float along = dot(w, d);
-	float warp = sin(along * 5.0 + perlin(w * 1.5) * 2.5) * 0.06 + sin(along * 11.0 + 1.7) * 0.015;
-	float u = (dot(w, n) + warp) / 0.2;
-	float f = fract(u);
+	vec2 cell = floor(w / 1.4);
+	float first = 1e9;
+	float second = 1e9;
+	vec2 id = cell;
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			vec2 c = cell + vec2(x, y);
+			float d = length(w - (c + 0.15 + hash2(c) * 0.7) * 1.4);
+			if (d < first) {
+				second = first;
+				first = d;
+				id = c;
+			} else if (d < second) second = d;
+		}
+	}
+	vec2 h = hash2(id + 7.3);
+	vec3 crop = h.x < 0.35 ? vec3(96.0, 186.0, 74.0) : h.x < 0.6 ? vec3(158.0, 208.0, 72.0) : h.x < 0.85 ? vec3(240.0, 202.0, 92.0) : vec3(72.0, 164.0, 84.0);
+	float angle = floor(h.y * 4.0) * 0.785398;
+	float u = dot(w, vec2(cos(angle), sin(angle))) / 0.16;
 	float aa = fwidth(u);
-	float stripe = smoothstep(0.15 - aa, 0.15 + aa, f) * (1.0 - smoothstep(0.7 - aa, 0.7 + aa, f));
-	vec3 soil = vec3(143.0, 86.0, 59.0) / 255.0;
-	vec3 crop = vec3(122.0, 140.0, 52.0) / 255.0;
+	float f = fract(u);
+	float row = smoothstep(0.2 - aa, 0.2 + aa, f) * (1.0 - smoothstep(0.75 - aa, 0.75 + aa, f));
 	float grain = 0.6 * perlin(w * 14.0) + 0.4 * perlin(w * 33.0);
-	return mix(soil, crop, stripe) * (1.0 + grain * 0.06);
+	vec3 rgb = mix(crop * 0.72, crop, row) / 255.0 * (1.0 + grain * 0.06);
+	float edge = second - first;
+	float ea = fwidth(edge);
+	return mix(vec3(52.0, 128.0, 60.0) / 255.0, rgb, smoothstep(0.05 - ea, 0.05 + ea, edge));
+}
+vec2 spot(int bits) {
+	int x = bits & 15;
+	return x > 8 ? vec2(sin(float(x - 9) * 1.0471976), -cos(float(x - 9) * 1.0471976)) : vec2(float(x - 4) * 0.2165064, float(((bits >> 4) & 7) - 2) * 0.375);
+}
+vec3 paved(vec3 rgb, vec2 local, int edges, bool highway) {
+	int roads = (int(v_nodes[2]) >> 15) & 127;
+	if (roads != 0) {
+		vec2 nodes[7];
+		bool highways[7];
+		for (int k = 0; k < 7; k++) {
+			int bits = (int(v_nodes[k / 3]) >> (8 * (k % 3))) & 255;
+			nodes[k] = (k > 0 ? NORMALS[k - 1] * 1.7320508 : vec2(0.0)) + spot(bits);
+			highways[k] = (bits >> 7) == 1;
+		}
+		int arms = ((highway ? edges >> 12 : 0) | (edges >> 18)) & 63;
+		int hubs = (int(v_nodes[2]) >> 8) & 127;
+		bool own = (roads & 1) == 1;
+		float road = own ? length(local - nodes[0]) - (highway ? 0.36 : 0.2) : 1e9;
+		float line = 1e9;
+		for (int i = 0; i < 6; i++) {
+			if (!own && ((roads >> (i + 1)) & 1) == 1) {
+				int after = (i + 1) % 6 + 1;
+				road = min(road, length(local - nodes[i + 1]) - (highways[i + 1] ? 0.36 : 0.2));
+				if (((roads >> after) & 1) == 0 || ((int(v_slopes) >> i) & 1) == 1) continue;
+				pave(road, line, local, nodes[i + 1], nodes[after], highways[i + 1], highways[after]);
+			}
+			if (!own || ((arms >> i) & 1) == 0) continue;
+			int next = (i + 1) % 6;
+			int previous = (i + 5) % 6;
+			bool linked = ((arms >> next) & 1) == 1;
+			bool sloped = ((int(v_slopes) >> i) & 1) == 1;
+			if (!sloped && !(linked && dropped(nodes, hubs, 0, i + 1, next + 1)) && !(((arms >> previous) & 1) == 1 && dropped(nodes, hubs, 0, i + 1, previous + 1))) pave(road, line, local, nodes[0], nodes[i + 1], highways[0], highways[i + 1]);
+			if (!linked || dropped(nodes, hubs, i + 1, next + 1, 0)) continue;
+			if (!dropped(nodes, hubs, 0, i + 1, next + 1) && !dropped(nodes, hubs, 0, next + 1, i + 1) && inside(local, nodes[0], nodes[i + 1], nodes[next + 1])) road = min(road, -1.0);
+			pave(road, line, local, nodes[i + 1], nodes[next + 1], highways[i + 1], highways[next + 1]);
+		}
+		float ra = length(fwidth(local));
+		rgb = mix(rgb, mix(PAINT, ASPHALT, smoothstep(0.025 - ra, 0.025 + ra, line)), 1.0 - smoothstep(-ra, ra, road));
+	}
+	return rgb;
 }
 vec3 surface(float id, vec2 world, vec2 local, vec3 top) {
 	if (id < 0.5) return top;
@@ -217,19 +285,10 @@ void main() {
 		float edge = 0.8660254 - max(abs(v_local.x), max(abs(dot(v_local, vec2(0.5, 0.8660254))), abs(dot(v_local, vec2(0.5, -0.8660254)))));
 		float aa = fwidth(edge);
 		int packed = int(v_surface + 0.5);
-		int flow = (packed / 100) % 10;
 		int slots[3] = int[3]((packed / 1000) % 8, (packed / 8000) % 8, (packed / 64000) % 8);
 		bool mined = slots[0] == 3 || slots[1] == 3 || slots[2] == 3;
 		bool highway = slots[0] == 1 || slots[1] == 1 || slots[2] == 1;
-		g_flow = flow > 0 ? NORMALS[flow - 1] : vec2(0.327, 0.945);
-		g_flows[0] = g_flow;
-		g_weights[0] = 1.0;
-		int flows = flow > 0 ? int(v_flows) : 0;
-		for (int i = 0; i < 6; i++) {
-			int other = (flows >> (3 * i)) & 7;
-			g_flows[i + 1] = other > 0 ? NORMALS[other - 1] : g_flow;
-			g_weights[i + 1] = other > 0 ? max(0.0, 1.0 - (0.8660254 - dot(v_local, NORMALS[i])) / 0.8) : 0.0;
-		}
+		g_rock = slots[0] == 6 || slots[1] == 6 || slots[2] == 6;
 		vec3 base = surface(float(packed % 100), v_world, v_local, v_top);
 		int edges = int(v_edges);
 		for (int s = 0; s < 3; s++) {
@@ -261,57 +320,95 @@ void main() {
 			if (kind == 2) contour = max(contour, 1.0 - smoothstep(0.08 - da, 0.08 + da, distance));
 		}
 		rgb = mix(rgb, THIN, thin * 0.4);
-		int roads = (int(v_nodes[2]) >> 15) & 127;
-		if (roads != 0) {
-			vec2 nodes[7];
-			bool highways[7];
-			for (int k = 0; k < 7; k++) {
-				int bits = (int(v_nodes[k / 3]) >> (8 * (k % 3))) & 255;
-				nodes[k] = (k > 0 ? NORMALS[k - 1] * 1.7320508 : vec2(0.0)) + vec2(float((bits & 15) - 4) * 0.2165064, float(((bits >> 4) & 7) - 2) * 0.375);
-				highways[k] = (bits >> 7) == 1;
-			}
-			int arms = ((edges >> 12) | (edges >> 18)) & 63;
-			int hubs = (int(v_nodes[2]) >> 8) & 127;
-			bool own = (roads & 1) == 1;
-			float road = own ? length(v_local - nodes[0]) - (highway ? 0.36 : 0.2) : 1e9;
-			float line = 1e9;
-			for (int i = 0; i < 6; i++) {
-				if (!own && ((roads >> (i + 1)) & 1) == 1) {
-					int after = (i + 1) % 6 + 1;
-					road = min(road, length(v_local - nodes[i + 1]) - (highways[i + 1] ? 0.36 : 0.2));
-					if (((roads >> after) & 1) == 0) continue;
-					bool both = highways[i + 1] && highways[after];
-					float d = segment(v_local, nodes[i + 1], nodes[after]);
-					road = min(road, d - (both ? 0.36 : 0.2));
-					if (both) line = min(line, d);
-				}
-				if (!own || ((arms >> i) & 1) == 0) continue;
-				int next = (i + 1) % 6;
-				int previous = (i + 5) % 6;
-				bool linked = ((arms >> next) & 1) == 1;
-				bool wide = highways[0] && highways[i + 1];
-				float d = segment(v_local, nodes[0], nodes[i + 1]);
-				if (!(linked && dropped(nodes, hubs, 0, i + 1, next + 1)) && !(((arms >> previous) & 1) == 1 && dropped(nodes, hubs, 0, i + 1, previous + 1))) {
-					road = min(road, d - (wide ? 0.36 : 0.2));
-					if (wide) line = min(line, d);
-				}
-				if (!linked || dropped(nodes, hubs, i + 1, next + 1, 0)) continue;
-				if (!dropped(nodes, hubs, 0, i + 1, next + 1) && !dropped(nodes, hubs, 0, next + 1, i + 1) && inside(v_local, nodes[0], nodes[i + 1], nodes[next + 1])) road = min(road, -1.0);
-				wide = highways[i + 1] && highways[next + 1];
-				d = segment(v_local, nodes[i + 1], nodes[next + 1]);
-				road = min(road, d - (wide ? 0.36 : 0.2));
-				if (wide) line = min(line, d);
-			}
-			float ra = length(fwidth(v_local));
-			rgb = mix(rgb, mix(PAINT, ASPHALT, smoothstep(0.025 - ra, 0.025 + ra, line)), 1.0 - smoothstep(-ra, ra, road));
-		}
-		rgb = mix(rgb, vec3(1.0), contour);
+		rgb = mix(rgb, THIN, contour);
+		rgb = paved(rgb, v_local, edges, highway);
 		color = vec4(dither(rgb), smoothstep(0.0, fwidth(open), open));
 	} else {
 		float seam = min(min(v_along, 1.0 - v_along), v_height);
 		float aa = fwidth(seam);
-		color = vec4(dither(mix(SEAM, v_side, smoothstep(0.02 - aa, 0.02 + aa, seam))), 1.0);
+		int edge = int(-v_kind + 0.5);
+		bool step = ((int(v_edges) >> (2 * edge)) & 3) == 1;
+		int packed = int(v_surface + 0.5);
+		vec3 top = (packed / 1000) % 8 == 5 || (packed / 8000) % 8 == 5 || (packed / 64000) % 8 == 5 ? farmland(v_world) : surface(float(packed % 100), v_world, v_local, v_top);
+		bool highway = (packed / 1000) % 8 == 1 || (packed / 8000) % 8 == 1 || (packed / 64000) % 8 == 1;
+		bool sloped = ((int(v_slopes) >> edge) & 1) == 1;
+		vec3 side = step ? (sloped ? top : paved(top, v_local, int(v_edges), highway)) : mix(SEAM, v_side, smoothstep(0.02 - aa, 0.02 + aa, seam));
+		color = vec4(dither(side), 1.0);
 	}
+}`;
+
+const RAMP_VERTEX = `#version 300 es
+in vec2 a_corner;
+in vec3 i_from;
+in vec3 i_to;
+in float i_wide;
+in vec2 i_bend;
+${PROJECT}
+out float v_across;
+out float v_along;
+out vec2 v_spot;
+flat out float v_length;
+flat out float v_wide;
+flat out vec4 v_arms;
+void main() {
+	int wide = int(i_wide + 0.5);
+	v_wide = i_wide;
+	if (wide >= 4) {
+		v_spot = a_corner * 0.7;
+		v_arms = vec4(i_to.xy, i_bend) - i_from.xyxy;
+		gl_Position = project(i_from.xy + v_spot - vec2(0.0, i_from.z));
+		return;
+	}
+	vec2 widths = vec2((wide & 1) == 1 ? 0.36 : 0.2, (wide & 2) == 2 ? 0.36 : 0.2);
+	float width = a_corner.x < 0.0 ? widths.x : widths.y;
+	float span = max(distance(i_to.xy, i_from.xy), 1e-4);
+	vec2 along = (i_to.xy - i_from.xy) / span;
+	float reach = a_corner.x < 0.0 ? -width : span + width;
+	vec3 point = mix(i_from, i_to, reach / span);
+	gl_Position = project(point.xy + vec2(-along.y, along.x) * a_corner.y * width - vec2(0.0, point.z));
+	v_across = a_corner.y * width;
+	v_along = reach;
+	v_length = span;
+}`;
+
+const RAMP_FRAGMENT = `#version 300 es
+precision highp float;
+in float v_across;
+in float v_along;
+in vec2 v_spot;
+flat in float v_length;
+flat in float v_wide;
+flat in vec4 v_arms;
+uniform float u_paint;
+out vec4 color;
+const vec3 ASPHALT = vec3(72.0, 70.0, 86.0) / 255.0;
+const vec3 PAINT = vec3(255.0, 222.0, 112.0) / 255.0;
+float arm(vec2 p, vec2 b) {
+	return length(p - b * clamp(dot(p, b) / dot(b, b), 0.0, 1.0));
+}
+void main() {
+	int kind = int(v_wide + 0.5);
+	if (kind >= 4) {
+		if (u_paint > 0.5) discard;
+		float a = arm(v_spot, v_arms.xy) - ((kind & 1) == 1 ? 0.36 : 0.2);
+		float b = arm(v_spot, v_arms.zw) - ((kind & 2) == 2 ? 0.36 : 0.2);
+		float h = clamp(0.5 + 0.5 * (b - a) / 0.15, 0.0, 1.0);
+		float s = mix(b, a, h) - 0.15 * h * (1.0 - h);
+		float edge = fwidth(s);
+		color = vec4(ASPHALT, 1.0 - smoothstep(-edge, 0.0, s));
+		return;
+	}
+	float d = length(vec2(max(max(-v_along, v_along - v_length), 0.0), v_across));
+	float aa = fwidth(d);
+	if (u_paint > 0.5) {
+		if (int(v_wide + 0.5) != 3) discard;
+		color = vec4(PAINT, 1.0 - smoothstep(0.025 - aa, 0.025 + aa, d));
+		return;
+	}
+	int wide = int(v_wide + 0.5);
+	float t = clamp(v_along / v_length, 0.0, 1.0);
+	float width = wide == 3 ? 0.36 : wide == 0 ? 0.2 : mix(0.36, 0.2, smoothstep(0.0, 0.3, wide == 1 ? t : 1.0 - t));
+	color = vec4(ASPHALT, 1.0 - smoothstep(width - aa, width, d));
 }`;
 
 const TREE_VERTEX = `#version 300 es
@@ -376,7 +473,7 @@ vec4 rock(vec2 p, float seed) {
 		float d = s * cross2(b - a, p - a) / length(b - a);
 		float lit = 0.95 + 0.35 * dot(normalize((a + b) / 2.0 - peak), light);
 		float seam = min(abs(cross2(normalize(a - peak), p - peak)), abs(cross2(normalize(b - peak), p - peak)));
-		return vec4(vec3(60.0, 61.0, 63.0) / 255.0 * lit * mix(0.85, 1.0, smoothstep(0.0, 0.012, seam)), smoothstep(-aa, aa, d) * smoothstep(0.0, -0.3, p.y));
+		return vec4(vec3(150.0, 144.0, 156.0) / 255.0 * lit * mix(0.85, 1.0, smoothstep(0.0, 0.012, seam)), smoothstep(-aa, aa, d) * smoothstep(0.0, -0.3, p.y));
 	}
 	return vec4(0.0);
 }
@@ -401,7 +498,7 @@ function template() {
 	for (let i = 0; i < FRONT.length - 1; i++) {
 		const [a, b] = [FRONT[i], FRONT[i + 1]];
 		for (const [corner, raise, along] of [[a, 0, 0], [b, 0, 1], [b, 1, 1], [a, 0, 0], [b, 1, 1], [a, 1, 0]] as const) {
-			push(corner, raise, 0, along);
+			push(corner, raise, -(i + 1), along);
 		}
 	}
 	for (let i = 0; i < 6; i++) {
@@ -437,11 +534,12 @@ function link(gl: WebGL2RenderingContext, vertex: string, fragment: string) {
 }
 
 export function renderer(canvas: HTMLCanvasElement): Renderer | null {
-	const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+	const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
 	if (!gl) return null;
 	const program = link(gl, VERTEX, FRAGMENT);
 	const forest = link(gl, TREE_VERTEX, TREE_FRAGMENT);
-	if (!program || !forest) return null;
+	const asphalt = link(gl, RAMP_VERTEX, RAMP_FRAGMENT);
+	if (!program || !forest || !asphalt) return null;
 
 	const shape = template();
 	const vao = gl.createVertexArray();
@@ -471,7 +569,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_highlight', 1, STRIDE, 13, 1);
 	attribute('i_surface', 1, STRIDE, 14, 1);
 	attribute('i_edges', 1, STRIDE, 15, 1);
-	attribute('i_flows', 1, STRIDE, 16, 1);
+	attribute('i_slopes', 1, STRIDE, 16, 1);
 
 	const grove = gl.createVertexArray();
 	gl.bindVertexArray(grove);
@@ -483,6 +581,19 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_root', 3, TREE_STRIDE, 0, 1, forest);
 	attribute('i_tree', 3, TREE_STRIDE, 3, 1, forest);
 	let planted = 0;
+
+	const road = gl.createVertexArray();
+	gl.bindVertexArray(road);
+	gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]), gl.STATIC_DRAW);
+	attribute('a_corner', 2, 2, 0, 0, asphalt);
+	const ramps = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, ramps);
+	attribute('i_from', 3, RAMP_STRIDE, 0, 1, asphalt);
+	attribute('i_to', 3, RAMP_STRIDE, 3, 1, asphalt);
+	attribute('i_wide', 1, RAMP_STRIDE, 6, 1, asphalt);
+	attribute('i_bend', 2, RAMP_STRIDE, 7, 1, asphalt);
+	let paved = 0;
 
 	gl.useProgram(forest);
 	gl.uniform1iv(gl.getUniformLocation(forest, 'u_sprites'), SPRITES.map((_, k) => k));
@@ -509,7 +620,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	gl.clearColor(14 / 255, 15 / 255, 16 / 255, 1);
 
 	const uniforms = (set: (uniform: (name: string) => WebGLUniformLocation | null) => void) => {
-		for (const each of [program, forest]) {
+		for (const each of [program, forest, asphalt]) {
 			gl.useProgram(each);
 			set((name) => gl.getUniformLocation(each, name));
 		}
@@ -534,6 +645,11 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 			planted = data.length / TREE_STRIDE;
 		},
+		pave(data) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, ramps);
+			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+			paved = data.length / RAMP_STRIDE;
+		},
 		draw(data: Float32Array, time = 0) {
 			gl.clear(gl.COLOR_BUFFER_BIT);
 			gl.useProgram(program);
@@ -542,6 +658,15 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bindBuffer(gl.ARRAY_BUFFER, instances);
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, shape.length / 5, data.length / STRIDE);
+			if (paved) {
+				gl.useProgram(asphalt);
+				gl.bindVertexArray(road);
+				const paint = gl.getUniformLocation(asphalt, 'u_paint');
+				gl.uniform1f(paint, 0);
+				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, paved);
+				gl.uniform1f(paint, 1);
+				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, paved);
+			}
 			if (!planted) return;
 			gl.useProgram(forest);
 			gl.uniform1f(gl.getUniformLocation(forest, 'u_time'), time);
@@ -569,6 +694,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	let stale = true;
 	let reach = 0;
 	let planted: Float32Array = new Float32Array();
+	let paved: Float32Array = new Float32Array();
 	let last: Float32Array | undefined;
 	const sprites = SPRITES.map(({ src }) => {
 		const sprite = new Image();
@@ -597,11 +723,12 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	const shade = (color: number[], light: number) => `rgb(${color.map((c) => c * light).join(' ')})`;
 
 	const road = (cx: number, cy: number, data: Float32Array, o: number) => {
-		const arms = ((data[o + 15] >> 12) | (data[o + 15] >> 18)) & 63;
+		const arms = ((((data[o + 9] >> 7) & 1) === 1 ? data[o + 15] >> 12 : 0) | (data[o + 15] >> 18)) & 63;
 		const nodes = Array.from({ length: 7 }, (_, k) => {
 			const bits = (data[o + 9 + Math.floor(k / 3)] >> (8 * (k % 3))) & 255;
 			const [x, y] = k > 0 ? [CORNERS[k - 1][0] + CORNERS[k % 6][0], CORNERS[k - 1][1] + CORNERS[k % 6][1]] : [0, 0];
-			return { x: cx + x + ((bits & 15) - 4) * 0.2165064, y: cy + y + (((bits >> 4) & 7) - 2) * 0.375, highway: bits >> 7 === 1 };
+			const [dx, dy] = (bits & 15) > 8 ? CORNERS[(bits & 15) - 9] : [((bits & 15) - 4) * 0.2165064, (((bits >> 4) & 7) - 2) * 0.375];
+			return { x: cx + x + dx, y: cy + y + dy, highway: bits >> 7 === 1 };
 		});
 		const gap = (a: number, b: number) => Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y);
 		const hubs = (data[o + 11] >> 8) & 127;
@@ -622,7 +749,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			if (linked(i + 1) && !longest(i + 1, next, 0)) pairs.push([i + 1, next]);
 			if (linked(i + 1) && !longest(i + 1, next, 0) && !longest(0, i + 1, next) && !longest(0, next, i + 1)) {
 				path([nodes[0], nodes[i + 1], nodes[next]].map(({ x, y }) => [x, y]));
-				context.fillStyle = 'rgb(54 56 59)';
+				context.fillStyle = 'rgb(72 70 86)';
 				context.fill();
 			}
 		}
@@ -639,9 +766,9 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.stroke();
 			context.lineCap = 'butt';
 		};
-		stroke(false, 0.4, 'rgb(54 56 59)');
-		stroke(true, 0.72, 'rgb(54 56 59)');
-		stroke(true, 0.05, 'rgb(238 241 146)');
+		stroke(false, 0.4, 'rgb(72 70 86)');
+		stroke(true, 0.72, 'rgb(72 70 86)');
+		stroke(true, 0.05, 'rgb(255 222 112)');
 	};
 
 	const inset = (cx: number, cy: number, open: boolean[], depth: number) => {
@@ -717,6 +844,12 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.lineWidth = 0.04 * scale;
 			context.stroke();
 			context.restore();
+			for (let j = 0; j < FRONT.length - 1; j++) {
+				if (((data[o + 15] >> (2 * (j + 1))) & 3) !== THIN) continue;
+				path([raised[j], raised[j + 1], ground[j + 1], ground[j]]);
+				context.fillStyle = `rgb(${[...data.subarray(o + 3, o + 6)].map((c) => c * 255).join(' ')})`;
+				context.fill();
+			}
 		}
 		const slots = [1000, 8000, 64000].map((unit) => Math.floor(data[o + 14] / unit) % 8);
 		const mined = slots.includes(3);
@@ -731,9 +864,9 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			if (slot === 5) {
 				context.save();
 				context.clip();
-				context.fillStyle = 'rgb(143 86 59)';
+				context.fillStyle = 'rgb(69 134 53)';
 				context.fill();
-				context.strokeStyle = 'rgb(122 140 52)';
+				context.strokeStyle = 'rgb(96 186 74)';
 				context.lineWidth = 0.13 * scale;
 				for (let k = -12; k <= 12; k++) {
 					const [a, b] = [-4, 4].map((t) => project(cx + 0.9397 * t - 0.342 * k * 0.2, cy - lift + 0.342 * t + 0.9397 * k * 0.2));
@@ -786,6 +919,19 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.stroke();
 		}
 		context.restore();
+	};
+
+	const ramps = () => {
+		for (let i = 0; i < paved.length; i += RAMP_STRIDE) {
+			const [x0, y0, l0, x1, y1, l1, wide] = paved.subarray(i, i + RAMP_STRIDE);
+			if (l0 === l1) continue;
+			const length = Math.hypot(x1 - x0, y1 - y0);
+			const width = wide === 3 ? 0.36 : 0.2;
+			const [px, py] = [((y0 - y1) / length) * width, ((x1 - x0) / length) * width];
+			path([[x0 + px, y0 + py - l0], [x1 + px, y1 + py - l1], [x1 - px, y1 - py - l1], [x0 - px, y0 - py - l0]]);
+			context.fillStyle = 'rgb(72 70 86)';
+			context.fill();
+		}
 	};
 
 	const forest = () => {
@@ -864,6 +1010,10 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			planted = data;
 			stale = true;
 		},
+		pave(data) {
+			paved = data;
+			stale = true;
+		},
 		draw(data) {
 			last = data;
 			const count = data.length / STRIDE;
@@ -877,6 +1027,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 					hex(data, i, false);
 					reach = Math.max(reach, data[i * STRIDE + 2]);
 				}
+				ramps();
 				forest();
 				cache.getContext('2d')!.drawImage(canvas, 0, 0);
 				stale = false;
