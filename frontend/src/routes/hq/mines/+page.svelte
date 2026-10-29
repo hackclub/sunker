@@ -9,13 +9,23 @@
 	let selected = $state(0);
 	let open = $state(false);
 
-	onMount(() => {
-		ringsState.active = true;
-		return () => (ringsState.active = false);
-	});
+	ringsState.active = true;
+	onMount(() => () => (ringsState.active = false));
+
+	function choose(ring: number) {
+		selected = ring;
+		open = true;
+	}
+
+	function onkeydown(event: KeyboardEvent, ring: number) {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		choose(ring);
+	}
 </script>
 
 <svelte:head>
+	<title>Mines - Hack Club Sunker</title>
 	<link
 		rel="stylesheet"
 		href="https://fonts.googleapis.com/css2?family=Share+Tech&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap"
@@ -27,13 +37,13 @@
 
 	<svg viewBox="-1 {CENTER_OFFSET - VIEW_HEIGHT} 2 {VIEW_HEIGHT}" preserveAspectRatio="xMidYMax meet">
 		{#each rings.toReversed() as ring}
-			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 			<circle
 				r={RING_WIDTH * (ring + 1)}
-				onclick={() => {
-					selected = ring;
-					open = true;
-				}}
+				role="button"
+				tabindex="0"
+				aria-label="Ring {ring}"
+				onclick={() => choose(ring)}
+				onkeydown={(event) => onkeydown(event, ring)}
 			/>
 		{/each}
 		{#each rings as ring}
@@ -46,18 +56,11 @@
 
 <style>
 	.mines {
-		--bg: #0e0f10;
-		--island: #1e1f22;
-		--island-border: #2b2d30;
-		--hover: #2b2d30;
-		--text: #dfe1e5;
-		--text-muted: #868a91;
-		--accent: #869ecf;
 		--radius: 12px;
 		--radius-small: 6px;
 		position: fixed;
 		inset: 0;
-		background: var(--bg);
+		background: var(--background);
 		color: var(--text);
 		font-family: 'Share Tech', sans-serif;
 		color-scheme: dark;
@@ -78,13 +81,19 @@
 
 	circle {
 		fill: transparent;
-		stroke: #2e3032;
+		stroke: var(--ring);
 		stroke-width: 1.5;
 		cursor: pointer;
 	}
 
+	.mines circle:focus-visible {
+		outline: none;
+		stroke: var(--accent);
+		stroke-width: 3;
+	}
+
 	text {
-		fill: #b4b7b9;
+		fill: var(--ring-label);
 		font-size: 18px;
 		text-anchor: middle;
 		dominant-baseline: middle;

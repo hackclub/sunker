@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
-	import { CACTUS, CONTOUR, RAMP_STRIDE, TREE, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
+	import { MAP, rgb } from '#lib/colors.js';
+	import { CONTOUR, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
 	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile } from '#lib/map.js';
 	import { perlin } from '#lib/noise.js';
-	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid } from '#lib/view.js';
+	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid, unprojector } from '#lib/view.js';
 
 	let { map, table = false }: { map: HexMap; table?: boolean } = $props();
 
 	const LEVEL = 0.1;
-	const GRID = [...rgb('#0e0f10'), 0.03];
+	const GRID = [...rgb(MAP.background), 0.03];
 	const GROVE = 0.4;
-	const VARIANTS = ['', 'highway', 'street', 'mine', 'beach', 'farmland', 'sunker'];
 	const ROADS = ['highway', 'street'];
 	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
@@ -20,15 +20,19 @@
 	let innerHeight = $state(0);
 	let ratio = $state(1);
 	let canvas: HTMLCanvasElement;
-	let gl: Renderer;
+	let painter: Renderer | undefined;
+	let restored = $state(0);
 	let hovered = $state.raw<PlacedTile | null>(null);
 	let pointer = $state({ x: 0, y: 0 });
+	let cardHeight = $state(0);
 	const card = $derived(hovered && describe(hovered.tile));
 
 	const tiles = $derived(place(map));
 	const ceiling = $derived(Math.min(...tiles.map((t) => t.tile.height)) * BACKGROUND);
 
 	const plane = $derived(frame(tiles, innerWidth, innerHeight));
+	const unproject = $derived(unprojector(plane, innerWidth, innerHeight));
+	const reach = $derived(Math.max(...tiles.map((t) => t.tile.height)) * LIFT);
 
 	const placed = $derived(new Map(tiles.map((t) => [`${t.row},${t.col}`, t])));
 	const groups = $derived.by(() => {
@@ -48,9 +52,12 @@
 	});
 
 	function edges({ tile, row, col }: PlacedTile) {
+		const mine = tile.variants.includes('mine');
 		return neighbours(row, col).reduce((bits, [r, c], i) => {
 			const other = placed.get(`${r},${c}`);
-			const kind = !other || tile.height - other.tile.height > LEVEL ? CONTOUR : Math.abs(tile.height - other.tile.height) <= LEVEL ? THIN : 0;
+			const step = other ? tile.height - other.tile.height : Infinity;
+			const across = mine !== Boolean(other?.tile.variants.includes('mine'));
+			const kind = step > LEVEL || (mine && across) ? CONTOUR : Math.abs(step) > LEVEL ? 0 : mine || across ? HIDDEN : THIN;
 			return bits | (kind << (2 * i));
 		}, 0);
 	}
@@ -60,11 +67,11 @@
 		const arms = (match: (other: PlacedTile) => boolean, shift: number) => around.reduce((bits, other, i) => (other && match(other) ? bits | (1 << (shift + i)) : bits), 0);
 		const road = roadOf(tile);
 		let bits = 0;
-		if (tile.variants.includes('mine')) bits |= arms((other) => other.tile.variants.includes('mine'), 12);
-		if (tile.variants.includes('beach')) bits |= arms((other) => other.tile.base !== tile.base, 12);
+		if (tile.variants.includes('mine')) bits |= arms((other) => other.tile.variants.includes('mine'), 0);
+		if (tile.variants.includes('beach')) bits |= arms((other) => other.tile.base !== tile.base, 6);
 		if (road === 'highway') bits |= arms((other) => roadOf(other.tile) === 'highway', 12);
-		if (road) bits |= arms((other) => roadOf(other.tile) !== '' && !(road === 'highway' && roadOf(other.tile) === 'highway'), 18);
-		return bits;
+		const links = road ? arms((other) => roadOf(other.tile) !== '' && !(road === 'highway' && roadOf(other.tile) === 'highway'), 18) : 0;
+		return [bits, links];
 	}
 
 	function linked(row: number, col: number) {
@@ -164,24 +171,24 @@
 		const found: number[][] = [];
 		for (const { tile, row, col, x, y } of tiles) {
 			if (tile.variants.includes('sunker')) {
-				found.push([x, y, tile.height * LIFT, 0.6 + hash(col, row, 5) * 0.2, hash(col, row, 6), 1]);
-				found.push([x + (hash(col, row, 7) - 0.5) * 0.6, y + 0.2 + hash(col, row, 8) * 0.2, tile.height * LIFT, 0.25 + hash(col, row, 9) * 0.1, hash(col, row, 10), 1]);
+				found.push([x, y, tile.height * LIFT, 0.6 + hash(col, row, 5) * 0.2, hash(col, row, 6), ROCK, y]);
+				found.push([x + (hash(col, row, 7) - 0.5) * 0.6, y + 0.2 + hash(col, row, 8) * 0.2, tile.height * LIFT, 0.25 + hash(col, row, 9) * 0.1, hash(col, row, 10), ROCK, y]);
 			}
-			if (tile.variants.includes('mountain')) found.push([x, y + 0.4, tile.height * LIFT, 0.9, hash(col, row, 12), 2]);
+			if (tile.variants.includes('mountain')) found.push([x, y + 0.4, tile.height * LIFT, 0.9, hash(col, row, 12), sprite('mountain'), y]);
 			if (tile.variants.includes('cactus')) {
 				const count = 2 + Math.floor(hash(col, row, 30) * 2);
 				for (let k = 0; k < count; k++) {
 					const tx = x + (hash(col, row, 31 + k) - 0.5) * 1.1;
 					const ty = y + (hash(col, row, 34 + k) - 0.3) * 0.7;
-					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 37 + k) * 0.5, hash(col, row, 40 + k), CACTUS]);
+					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 37 + k) * 0.5, hash(col, row, 40 + k), sprite('cactus'), y]);
 				}
 			}
-			const kinds = tile.variants.includes('buildings') ? [3, 4] : tile.variants.includes('houses') ? [5, 6] : null;
+			const kinds = tile.variants.includes('buildings') ? [sprite('building1'), sprite('building2')] : tile.variants.includes('houses') ? [sprite('house1'), sprite('house2')] : null;
 			if (kinds) {
 				const count = 2 + Math.floor(hash(col, row, 13) * 2);
 				for (let k = 0; k < count; k++) {
 					const along = (k + 0.5) / count - 0.5 + (hash(col, row, 14 + k) - 0.5) * 0.15;
-					found.push([x + along * 1.2, y + 0.25 + hash(col, row, 17 + k) * 0.2, tile.height * LIFT, 0.85 + hash(col, row, 20 + k) * 0.3, 0, kinds[hash(col, row, 23 + k) < 0.5 ? 0 : 1]]);
+					found.push([x + along * 1.2, y + 0.25 + hash(col, row, 17 + k) * 0.2, tile.height * LIFT, 0.85 + hash(col, row, 20 + k) * 0.3, 0, kinds[hash(col, row, 23 + k) < 0.5 ? 0 : 1], y]);
 				}
 			}
 			if (!tile.variants.includes('forest')) continue;
@@ -192,7 +199,7 @@
 					const ty = (row + 0.15 + hash(col, row, 2) * 0.7) * GROVE;
 					const [dx, dy] = [Math.abs(tx - x), Math.abs(ty - y)];
 					if (dx > WIDTH / 2 || dx * 0.5 + dy * WIDTH / 2 > WIDTH / 2) continue;
-					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), TREE]);
+					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), sprite('tree'), y]);
 				}
 			}
 		}
@@ -235,35 +242,36 @@
 				const level = other.tile.height === tile.tile.height;
 				if (other.tile.height > tile.tile.height || (level && (roadOf(tile.tile) !== 'highway' || roadOf(other.tile) !== 'highway' || other.row * 1000 + other.col < tile.row * 1000 + tile.col))) continue;
 				const [a, b] = [junction(tile), junction(other)];
-				found.push(...a, tile.tile.height * LIFT, ...b, other.tile.height * LIFT, (roadOf(tile.tile) === 'highway' ? 1 : 0) + (roadOf(other.tile) === 'highway' ? 2 : 0), 0, 0);
+				found.push(...a, tile.tile.height * LIFT, ...b, other.tile.height * LIFT, (roadOf(tile.tile) === 'highway' ? 1 : 0) + (roadOf(other.tile) === 'highway' ? 2 : 0), 0, 0, Math.max(tile.y, other.y));
 			}
 		}
-		const corners = new Map<string, { at: number[]; lift: number; arms: [number[], boolean][] }>();
+		const corners = new Map<string, { at: number[]; lift: number; depth: number; arms: [number[], boolean][] }>();
 		for (const tile of tiles) {
 			if ((node(tile.row, tile.col) & 15) <= 8) continue;
 			const at = junction(tile);
 			const key = at.map((v) => v.toFixed(3)).join();
-			const corner = corners.get(key) ?? { at, lift: tile.tile.height * LIFT, arms: [] };
+			const corner = corners.get(key) ?? { at, lift: tile.tile.height * LIFT, depth: tile.y, arms: [] };
 			corners.set(key, corner);
 			for (const [, other] of links(tile)) {
+				corner.depth = Math.max(corner.depth, tile.y, other.y);
 				const b = junction(other);
 				if (Math.hypot(b[0] - at[0], b[1] - at[1]) > 0.01) corner.arms.push([b, roadOf(tile.tile) === 'highway' && roadOf(other.tile) === 'highway']);
 			}
 		}
-		for (const { at, lift, arms } of corners.values()) {
+		for (const { at, lift, depth, arms } of corners.values()) {
 			const angle = ([[x, y]]: [number[], boolean]) => Math.atan2(y - at[1], x - at[0]);
 			arms.sort((a, b) => angle(a) - angle(b));
 			arms.forEach((first, k) => {
 				const second = arms[(k + 1) % arms.length];
 				const gap = (angle(second) - angle(first) + Math.PI * 2) % (Math.PI * 2);
-				if (arms.length > 1 && gap < Math.PI) found.push(...at, lift, ...first[0], lift, 4 + (first[1] ? 1 : 0) + (second[1] ? 2 : 0), ...second[0]);
+				if (arms.length > 1 && gap < Math.PI) found.push(...at, lift, ...first[0], lift, 4 + (first[1] ? 1 : 0) + (second[1] ? 2 : 0), ...second[0], depth);
 			});
 		}
 		return new Float32Array(found);
 	});
 
 	const field = $derived.by(() => {
-		const { rows, cols } = grid(plane);
+		const { rows, cols } = grid(plane, innerWidth, innerHeight, reach);
 		const hexes = [];
 		for (let row = rows[0]; row <= rows[1]; row++) {
 			for (let col = cols[0]; col <= cols[1]; col++) {
@@ -275,12 +283,7 @@
 	});
 
 	function pick(screenX: number, screenY: number) {
-		const radians = (TILT * Math.PI) / 180;
-		const v = screenY - innerHeight / 2;
-		const ry = v / (Math.cos(radians) + (v * Math.sin(radians)) / PERSPECTIVE);
-		const rx = (screenX - innerWidth / 2) * (1 - (ry * Math.sin(radians)) / PERSPECTIVE);
-		const x = (rx + plane.width / 2 - plane.x) / plane.scale;
-		const y = (ry + plane.height / 2 - plane.y) / plane.scale;
+		const [x, y] = unproject(screenX, screenY);
 		for (let i = tiles.length - 1; i >= 0; i--) {
 			const tile = tiles[i];
 			const dx = Math.abs(x - tile.x);
@@ -316,10 +319,26 @@
 	});
 
 	$effect(() => {
+		const lost = (event: Event) => event.preventDefault();
+		const restore = () => {
+			painter = undefined;
+			restored++;
+		};
+		canvas.addEventListener('webglcontextlost', lost);
+		canvas.addEventListener('webglcontextrestored', restore);
+		return () => {
+			canvas.removeEventListener('webglcontextlost', lost);
+			canvas.removeEventListener('webglcontextrestored', restore);
+			painter?.destroy();
+		};
+	});
+
+	$effect(() => {
+		restored;
 		const { width, height, scale, x, y } = plane;
 		const hexes = field;
 		const top = ceiling;
-		gl ??= renderer(canvas) ?? fallback(canvas);
+		const gl = (painter ??= renderer(canvas) ?? fallback(canvas));
 		gl.resize(
 			{ width: innerWidth, height: innerHeight, ratio },
 			{ width, height, scale, x, y },
@@ -336,8 +355,10 @@
 				const { tile } = hex.placed;
 				const base = tile.base in BASES ? tile.base : 'plain';
 				data.set([tile.height * LIFT, ...rgb(BASES[base].flat), ...rgb(tile.side)], o + 2);
-				data[o + 14] = NAMES.indexOf(base) + 1 + tile.variants.map((variant) => VARIANTS.indexOf(variant)).filter((index) => index > 0).slice(0, 3).reduce((sum, index, k) => sum + index * 1000 * 8 ** k, 0);
-				data[o + 15] = edges(hex.placed) | roads(hex.placed);
+				data[o + 14] = NAMES.indexOf(base) + 1 + pack(tile.variants) * 1000;
+				const [arms, links] = roads(hex.placed);
+				data[o + 15] = edges(hex.placed) | links;
+				data[o + 17] = arms;
 				data[o + 16] = slopes(hex.placed).reduce((bits, [i]) => bits | (1 << i), 0);
 				if (roadOf(tile) || linked(hex.placed.row, hex.placed.col).length) data.set(nodes(hex.placed), o + 9);
 			} else {
@@ -380,14 +401,10 @@
 
 <svelte:window bind:innerWidth bind:innerHeight />
 
-<svelte:head>
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" />
-</svelte:head>
-
 <div class="map" class:table role="presentation" onpointermove={table ? undefined : onpointermove} onpointerleave={() => (hovered = null)}>
 	<canvas bind:this={canvas}></canvas>
 	{#if card}
-		<div class="card" class:flipped={pointer.x > innerWidth - 280} style:left="{pointer.x}px" style:top="{pointer.y}px">
+		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:left="{pointer.x}px" style:top="{pointer.y}px" bind:clientHeight={cardHeight}>
 			<h2>{card.title}</h2>
 			{#if card.effects.length}
 				<ul>
@@ -408,7 +425,7 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
-		background: #0e0f10;
+		background: var(--background);
 	}
 
 	.table {
@@ -427,18 +444,22 @@
 		min-width: 160px;
 		max-width: 260px;
 		padding: 10px 14px;
-		border: 1px solid #2b2d30;
+		border: 1px solid var(--island-border);
 		border-radius: 12px;
-		background: #1e1f22;
-		color: #dfe1e5;
+		background: var(--island);
+		color: var(--text);
 		font: 13px 'Inter', sans-serif;
-		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+		box-shadow: 0 16px 48px var(--shadow);
 		pointer-events: none;
-		transform: translate(16px, 16px);
+		transform: translate(var(--dx, 16px), var(--dy, 16px));
 	}
 
 	.card.flipped {
-		transform: translate(calc(-100% - 16px), 16px);
+		--dx: calc(-100% - 16px);
+	}
+
+	.card.above {
+		--dy: calc(-100% - 16px);
 	}
 
 	h2 {
@@ -457,10 +478,10 @@
 		display: flex;
 		justify-content: space-between;
 		gap: 16px;
-		color: #e06c6c;
+		color: var(--negative);
 	}
 
 	li.positive {
-		color: #6cc47a;
+		color: var(--positive);
 	}
 </style>

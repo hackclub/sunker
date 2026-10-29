@@ -224,7 +224,9 @@
 
 	$effect(() => {
 		ringsState.active;
-		untrack(build);
+		let cancelled = false;
+		document.fonts.load(FONT).then(() => cancelled || untrack(build));
+		return () => (cancelled = true);
 	});
 
 	$effect(() => {
@@ -236,7 +238,6 @@
 			mouse = null;
 			updateHover();
 		};
-		document.fonts.load(FONT).then(build);
 		window.addEventListener('resize', build);
 		window.addEventListener('pointermove', onMove);
 		document.documentElement.addEventListener('pointerleave', onLeave);

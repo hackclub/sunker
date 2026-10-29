@@ -1,9 +1,10 @@
+import { MAP } from '#lib/colors.js';
+
 export interface Tile {
 	height?: number;
 	base?: string;
 	side?: string;
 	variants?: string[];
-	flow?: number;
 }
 
 export interface HexMap {
@@ -18,7 +19,7 @@ export interface PlacedTile {
 	y: number;
 }
 
-export const DEFAULT_TILE: Required<Tile> = { height: 0.5, base: 'plain', side: '#6b4a34', variants: [], flow: -1 };
+export const DEFAULT_TILE: Required<Tile> = { height: 0.5, base: 'plain', side: MAP.side, variants: [] };
 
 export const SIZE = 1;
 export const WIDTH = Math.sqrt(3) * SIZE;

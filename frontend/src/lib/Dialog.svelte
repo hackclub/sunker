@@ -36,11 +36,11 @@
 		border-radius: var(--radius);
 		background: var(--island);
 		color: var(--text);
-		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+		box-shadow: 0 16px 48px var(--shadow);
 	}
 
 	dialog::backdrop {
-		background: rgb(0 0 0 / 0.5);
+		background: var(--shadow);
 	}
 
 	header {

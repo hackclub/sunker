@@ -20,20 +20,19 @@ float perlin(vec2 p) {
 	float c = dot(hash2(i + vec2(0.0, 1.0)) * 2.0 - 1.0, f - vec2(0.0, 1.0));
 	float d = dot(hash2(i + vec2(1.0, 1.0)) * 2.0 - 1.0, f - vec2(1.0, 1.0));
 	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}`;
-
-export const BASES: Record<string, Base> = {
-	plain: { glsl: 'return vec3(58.0, 68.0, 102.0) / 255.0;', flat: '#3a4466' },
-	grass: {
-		flat: '#6cc25e',
-		functions: `
+}
 float grass_blade(vec2 q, float side, float radius) {
 	vec2 v = q - vec2(side * radius, 0.0);
 	float theta = atan(-v.y, -side * v.x);
 	if (theta >= 0.0 && theta <= 0.9) return abs(length(v) - radius);
 	vec2 tip = vec2(side * radius * (1.0 - cos(0.9)), -radius * sin(0.9));
 	return min(length(q), length(q - tip));
-}`,
+}`;
+
+export const BASES: Record<string, Base> = {
+	plain: { glsl: 'return vec3(58.0, 68.0, 102.0) / 255.0;', flat: '#3a4466' },
+	grass: {
+		flat: '#6cc25e',
 		glsl: `
 	float n = 0.5 * perlin(world * 0.5) + 0.3 * perlin(world * 1.2) + 0.2 * perlin(world * 2.6) + 0.12 * perlin(world * 6.0) + 0.08 * perlin(world * 14.0);
 	vec3 color = mix(vec3(92.0, 184.0, 88.0), vec3(130.0, 208.0, 104.0), clamp(n * 0.9 + 0.5, 0.0, 1.0)) / 255.0;

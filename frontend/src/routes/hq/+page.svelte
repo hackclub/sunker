@@ -12,7 +12,8 @@
 	import battleIcon from '#lib/assets/images/battle-icon.png';
 	import profileIcon from '#lib/assets/images/profile.png';
 	import xIcon from '#lib/assets/images/x-icon.png';
-	import SidePanel from '#lib/SidePanel.svelte';
+	import SidePanel, { DIALOG_WIDTH, offset } from '#lib/SidePanel.svelte';
+	import { PALETTE } from '#lib/colors.js';
 	import WorldMap from '#lib/WorldMap.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -67,12 +68,14 @@
 	const MULLION = 3;
 	const RAIL = 5;
 	const REFRACTION = 8;
+	const ANGLE = 40;
+	const SMOOTH = false;
 
 	const seed = 0x5eed;
 
-	function pick(row: number, col: number) {
+	function pick(row: number, col: number, count: number) {
 		const h = Math.imul(seed ^ (row * 73856093) ^ (col * 19349663), 2654435761) >>> 0;
-		return ((h ^ (h >>> 16)) >>> 0) % PLANKS.length;
+		return ((h ^ (h >>> 16)) >>> 0) % count;
 	}
 
 	function random(n: number) {
@@ -80,11 +83,11 @@
 		return ((h ^ (h >>> 16)) >>> 0) / 2 ** 32;
 	}
 
-	let angle = $state(40);
-	let smooth = $state(false);
 	let innerWidth = $state(0);
 	let innerHeight = $state(0);
-	const wall = $derived(Math.round((innerHeight * devicePixelRatio) / 3));
+	let ratio = $state(1);
+	let natural = $state(0);
+	const wall = $derived(Math.round((innerHeight * ratio) / 3));
 	let floor: HTMLCanvasElement;
 	let windows: HTMLCanvasElement;
 	let images: HTMLImageElement[] = $state([]);
@@ -94,6 +97,15 @@
 		const image = new Image();
 		image.src = src;
 		return image.decode().then(() => image);
+	}
+
+	async function settle(sources: string[]) {
+		const results = await Promise.allSettled(sources.map(load));
+		return results.flatMap((result) => {
+			if (result.status === 'fulfilled') return [result.value];
+			console.error(result.reason);
+			return [];
+		});
 	}
 
 	const tiles = $derived(place(data.map));
@@ -117,6 +129,17 @@
 	let settled = page.url.searchParams.has('map');
 	let flight: HTMLElement;
 	let animations: Animation[] = [];
+	let keyframes: ReturnType<typeof reveal> | undefined;
+
+	$effect(() => {
+		const size = [tiles, innerWidth, innerHeight] as const;
+		keyframes = undefined;
+		if (!innerWidth || !innerHeight) return;
+		const later = window.requestIdleCallback ?? setTimeout;
+		const cancel = window.cancelIdleCallback ?? clearTimeout;
+		const id = later(() => (keyframes = reveal(...size)));
+		return () => cancel(id);
+	});
 
 	function onclick(event: MouseEvent) {
 		event.preventDefault();
@@ -129,9 +152,9 @@
 	}
 
 	async function fly(opening: boolean) {
-		if (animations.length) animations.forEach((animation) => animation.reverse());
+		if (animations.length) animations.forEach((animation) => (animation.playbackRate = -animation.playbackRate));
 		else {
-			const { grow, spread } = reveal(tiles, innerWidth, innerHeight);
+			const { grow, spread } = keyframes ?? reveal(tiles, innerWidth, innerHeight);
 			const options: KeyframeAnimationOptions = { duration: FLIGHT, fill: 'both', direction: opening ? 'normal' : 'reverse' };
 			animations = [flight.animate(grow, options), flight.animate(spread, options)];
 		}
@@ -149,16 +172,24 @@
 	});
 
 	$effect(() => {
-		Promise.all(PLANKS.map(load)).then((loaded) => (images = loaded));
-		Promise.all(BUILDINGS.map(load)).then((loaded) => (buildings = loaded));
+		settle(PLANKS).then((loaded) => (images = loaded));
+		settle(BUILDINGS).then((loaded) => (buildings = loaded));
+	});
+
+	$effect(() => {
+		const query = matchMedia(`(resolution: ${ratio}dppx)`);
+		const update = () => (ratio = devicePixelRatio);
+		update();
+		query.addEventListener('change', update);
+		return () => query.removeEventListener('change', update);
 	});
 
 	const view = $derived.by(() => {
-		const dpr = devicePixelRatio;
+		const dpr = ratio;
 		const width = Math.round(innerWidth * dpr);
 		const height = Math.round(innerHeight * dpr);
 		const focal = height;
-		const pitch = (angle * Math.PI) / 180;
+		const pitch = (ANGLE * Math.PI) / 180;
 		const camera = (focal * Math.sin(pitch)) / (SCALE * dpr);
 
 		const project = (y: number) => {
@@ -188,17 +219,17 @@
 		for (let row = 0; row * HEIGHT < flat.height; row++) {
 			const offset = Math.round(((row % 5) * WIDTH) / 5) - WIDTH;
 			for (let col = 0; col * WIDTH + offset < flat.width; col++) {
-				flatContext.drawImage(images[pick(row, col)], col * WIDTH + offset, row * HEIGHT);
+				flatContext.drawImage(images[pick(row, col, images.length)], col * WIDTH + offset, row * HEIGHT);
 			}
 		}
 
 		floor.width = width;
 		floor.height = height;
 		const context = floor.getContext('2d')!;
-		context.imageSmoothingEnabled = smooth;
+		context.imageSmoothingEnabled = SMOOTH;
 		for (let y = wall; y < height; y++) {
 			const { distance, stretch } = project(y);
-			const source = smooth ? far.distance - distance : Math.floor(far.distance - distance);
+			const source = SMOOTH ? far.distance - distance : Math.floor(far.distance - distance);
 			context.drawImage(flat, flat.width / 2 - (width / 2) * stretch, source, width * stretch, 1, 0, y, width, 1);
 		}
 	});
@@ -206,7 +237,7 @@
 	$effect(() => {
 		if (!buildings.length) return;
 		const { width, focal, lift } = view;
-		const snap = (n: number) => (smooth ? n : Math.round(n));
+		const snap = (n: number) => (SMOOTH ? n : Math.round(n));
 		const span = (left: number, right: number, y: number, rows: number) => {
 			const start = snap(left);
 			context.fillRect(start, y, snap(right) - start, rows);
@@ -215,7 +246,7 @@
 		windows.width = width;
 		windows.height = wall;
 		const context = windows.getContext('2d')!;
-		context.imageSmoothingEnabled = smooth;
+		context.imageSmoothingEnabled = SMOOTH;
 
 		const unit = focal / lift(wall / 2).depth;
 		const margin = Math.ceil(unit * REFRACTION);
@@ -223,11 +254,11 @@
 		backdrop.width = width + margin * 2;
 		backdrop.height = wall;
 		const backdropContext = backdrop.getContext('2d')!;
-		backdropContext.imageSmoothingEnabled = smooth;
+		backdropContext.imageSmoothingEnabled = SMOOTH;
 
 		const sky = backdropContext.createRadialGradient(backdrop.width / 2, wall * 1.5, 0, backdrop.width / 2, wall * 1.5, wall * 2);
-		sky.addColorStop(0, '#a8d8f0');
-		sky.addColorStop(0.75, '#5a8fc8');
+		sky.addColorStop(0, PALETTE.sky);
+		sky.addColorStop(0.75, PALETTE.horizon);
 		backdropContext.fillStyle = sky;
 		backdropContext.fillRect(0, 0, backdrop.width, wall);
 
@@ -268,14 +299,14 @@
 <svelte:window bind:innerWidth bind:innerHeight {onkeydown} {onpointermove} />
 
 <svelte:head>
-	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" />
+	<title>{wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
 </svelte:head>
 
 <div class="hq">
-	<canvas class="floor" class:smooth bind:this={floor}></canvas>
-	<canvas class="windows" class:smooth style:height="{wall / devicePixelRatio}px" bind:this={windows}></canvas>
+	<canvas class="floor" class:smooth={SMOOTH} bind:this={floor}></canvas>
+	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
-	<img class="table" src={table} alt="" />
+	<img class="table" src={table} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
 	{#if hovering && !wanted}
 		<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
 	{/if}
@@ -283,20 +314,7 @@
 
 	{#each ['left', 'right'] as const as side}
 		{@const section = panels[side][active[side]]}
-		<SidePanel {side} open={open[side]}>
-			{#each panels[side] as { label, icon, disabled, dot }, i}
-				<button
-					aria-label={label}
-					aria-expanded={open[side] && active[side] === i}
-					tabindex={i * 2 + (side === 'left' ? 1 : 2)}
-					{disabled}
-					onclick={() => toggle(side, i)}
-				>
-					<img src={icon} alt="" />
-					{#if dot}<span class="dot"></span>{/if}
-					<span class="tip {side}">{label}</span>
-				</button>
-			{/each}
+		<SidePanel {side} open={open[side]} count={panels[side].length}>
 			{#snippet dialog()}
 				<header class={side}>
 					<h2>{section.label}</h2>
@@ -309,7 +327,28 @@
 		</SidePanel>
 	{/each}
 
-	<div class="flight" class:open={wanted} style:transform={wanted ? null : pose} style:clip-path={wanted ? null : clip} bind:this={flight}>
+	{#each { length: Math.max(panels.left.length, panels.right.length) }, i}
+		{#each ['left', 'right'] as const as side}
+			{#if panels[side][i]}
+				{@const { label, icon, disabled, dot } = panels[side][i]}
+				<button
+					class="tab {side}"
+					aria-label={label}
+					aria-expanded={open[side] && active[side] === i}
+					style:top="calc(50% + {offset(panels[side].length, i)}px)"
+					style:transform={open[side] ? `translateX(${(side === 'left' ? 1 : -1) * (DIALOG_WIDTH + 8)}px)` : null}
+					{disabled}
+					onclick={() => toggle(side, i)}
+				>
+					<img src={icon} alt="" />
+					{#if dot}<span class="dot"></span>{/if}
+					<span class="tip {side}">{label}</span>
+				</button>
+			{/if}
+		{/each}
+	{/each}
+
+	<div class="flight" class:open={wanted} style:transform={wanted ? null : pose} style:--clip={wanted ? null : clip} bind:this={flight}>
 		<WorldMap map={data.map} table={!wanted} />
 		{#if wanted}
 			<button class="back" aria-label="Back to HQ" onclick={close}>
@@ -321,11 +360,6 @@
 
 <style>
 	.hq {
-		--island: #1e1f22;
-		--island-border: #2b2d30;
-		--hover: #2b2d30;
-		--text: #dfe1e5;
-		--accent: #869ecf;
 		color: var(--text);
 		color-scheme: dark;
 		font: 13px 'Inter', sans-serif;
@@ -383,7 +417,7 @@
 		position: absolute;
 		top: 50%;
 		padding: 6px 10px;
-		border: 1px solid #393b40;
+		border: 1px solid var(--tip-border);
 		border-radius: 6px;
 		background: var(--island);
 		white-space: nowrap;
@@ -424,7 +458,21 @@
 		width: 20px;
 		height: 20px;
 		border-radius: 50%;
-		background: #3574f0;
+		background: var(--dot);
+	}
+
+	.tab {
+		position: fixed;
+		z-index: 21;
+		transition: transform 0.25s ease;
+	}
+
+	.tab.left {
+		left: 0;
+	}
+
+	.tab.right {
+		right: 0;
 	}
 
 	button:focus-visible {
@@ -462,8 +510,8 @@
 		width: 100%;
 		height: 100%;
 		pointer-events: none;
-		fill: #fff;
-		stroke: #fff;
+		fill: var(--outline);
+		stroke: var(--outline);
 		stroke-linejoin: round;
 	}
 
@@ -473,6 +521,7 @@
 		z-index: 10;
 		pointer-events: none;
 		will-change: transform;
+		clip-path: var(--clip, none);
 	}
 
 	.flight.open {
@@ -485,13 +534,13 @@
 		left: 16px;
 		width: 48px;
 		height: 48px;
-		border: 1px solid #2b2d30;
+		border: 1px solid var(--island-border);
 		border-radius: 6px;
-		background: #1e1f22;
+		background: var(--island);
 	}
 
 	.back:hover {
-		background: #2b2d30;
+		background: var(--hover);
 	}
 
 	.back svg {
@@ -519,8 +568,7 @@
 		left: 50%;
 		width: calc(100vw / 2);
 		transform: translate(-50%, -50%);
-		--px: calc(100vw / 2 / 512);
-		filter: drop-shadow(var(--px) 0 #2e1a10) drop-shadow(calc(-1 * var(--px)) 0 #2e1a10)
-			drop-shadow(0 var(--px) #2e1a10) drop-shadow(0 calc(-1 * var(--px)) #2e1a10);
+		filter: drop-shadow(var(--px) 0 var(--table-edge)) drop-shadow(calc(-1 * var(--px)) 0 var(--table-edge))
+			drop-shadow(0 var(--px) var(--table-edge)) drop-shadow(0 calc(-1 * var(--px)) var(--table-edge));
 	}
 </style>

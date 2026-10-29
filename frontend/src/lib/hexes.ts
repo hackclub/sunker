@@ -1,4 +1,5 @@
 import { BASES, LIBRARY, NAMES } from '#lib/bases.js';
+import { MAP, css, rgb, vec3 } from '#lib/colors.js';
 import { CORNERS, FRONT, WIDTH } from '#lib/map.js';
 import mountain from '#lib/assets/images/mountain.png';
 import building1 from '#lib/assets/images/building1.png';
@@ -8,24 +9,31 @@ import house2 from '#lib/assets/images/house2.png';
 import tree from '#lib/assets/images/tree.png';
 import cactus from '#lib/assets/images/cactus.png';
 
-export const STRIDE = 17;
+export const STRIDE = 18;
 export const THIN = 1;
 export const CONTOUR = 2;
-export const TREE_STRIDE = 6;
-export const RAMP_STRIDE = 9;
+export const HIDDEN = 3;
+export const TREE_STRIDE = 7;
+export const RAMP_STRIDE = 10;
+export const ROCK = 1;
 
 const SPRITES = [
-	{ src: mountain, size: [256, 256], anchor: [112, 200], unit: 1.9 / 256, flat: true },
-	{ src: building1, size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
-	{ src: building2, size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
-	{ src: house1, size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
-	{ src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
-	{ src: tree, size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
-	{ src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false }
-];
-const spriteKind = (src: string) => 2 + SPRITES.findIndex((sprite) => sprite.src === src);
-export const TREE = spriteKind(tree);
-export const CACTUS = spriteKind(cactus);
+	{ name: 'mountain', src: mountain, size: [256, 256], anchor: [112, 200], unit: 1.9 / 256, flat: true },
+	{ name: 'building1', src: building1, size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
+	{ name: 'building2', src: building2, size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
+	{ name: 'house1', src: house1, size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
+	{ name: 'house2', src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
+	{ name: 'tree', src: tree, size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
+	{ name: 'cactus', src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false }
+] as const;
+export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
+const TREE = sprite('tree');
+
+const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker'];
+const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
+export const pack = (variants: string[]) => variants.reduce((mask, variant) => (VARIANTS.includes(variant) ? mask | flag(variant) : mask), 0);
+const FLAGS = VARIANTS.map((variant) => `const int ${variant.toUpperCase()} = ${flag(variant)};`).join('\n');
+
 const float = (n: number) => (Number.isInteger(n) ? `${n}.0` : `${n}`);
 const SPRITE_CONSTANTS = `
 const vec2 SPRITE_SIZES[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES.map(({ size }) => `vec2(${size.map(float)})`)});
@@ -33,7 +41,7 @@ const vec2 SPRITE_ANCHORS[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES
 const float SPRITE_UNITS[${SPRITES.length}] = float[${SPRITES.length}](${SPRITES.map(({ unit }) => float(unit))});
 const bool SPRITE_FLAT[${SPRITES.length}] = bool[${SPRITES.length}](${SPRITES.map(({ flat }) => flat)});`;
 
-const BORDERS: Record<number, { width: number; color: string }> = { [THIN]: { width: 0.015, color: 'rgb(255 248 228 / 0.4)' }, [CONTOUR]: { width: 0.08, color: 'rgb(255 248 228)' } };
+const BORDERS: Record<number, { width: number; focus: number; alpha: number }> = { [THIN]: { width: 0.015, focus: 0.035, alpha: 0.4 }, [CONTOUR]: { width: 0.08, focus: 0.1, alpha: 1 } };
 
 type Screen = { width: number; height: number; ratio: number };
 type Plane = { width: number; height: number; scale: number; x: number; y: number };
@@ -45,6 +53,7 @@ export interface Renderer {
 	plant(trees: Float32Array): void;
 	pave(ramps: Float32Array): void;
 	draw(data: Float32Array, time?: number): void;
+	destroy(): void;
 }
 
 const PROJECT = `
@@ -52,11 +61,16 @@ uniform vec3 u_view;
 uniform vec2 u_plane;
 uniform vec2 u_screen;
 uniform vec3 u_camera;
+uniform vec2 u_depth;
 vec4 project(vec2 world) {
 	vec2 relative = world * u_view.x + u_view.yz - u_plane / 2.0;
 	float w = 1.0 - relative.y * u_camera.z / u_camera.x;
 	vec2 screen = vec2(relative.x, relative.y * u_camera.y) / (u_screen / 2.0);
 	return vec4(screen.x, -screen.y, 0.0, w);
+}
+vec4 layer(vec4 position, float y) {
+	position.z = (1.0 - 2.0 * clamp((y - u_depth.x) / u_depth.y, 0.0, 1.0)) * 0.999 * position.w;
+	return position;
 }`;
 
 const VERTEX = `#version 300 es
@@ -73,6 +87,7 @@ in float i_highlight;
 in float i_surface;
 in float i_edges;
 in float i_slopes;
+in float i_arms;
 ${PROJECT}
 out vec2 v_local;
 out float v_kind;
@@ -86,10 +101,11 @@ out vec2 v_world;
 flat out float v_surface;
 flat out float v_edges;
 flat out float v_slopes;
+flat out float v_arms;
 flat out vec3 v_nodes;
 void main() {
 	vec2 position = a_kind > 0.5 ? a_position * 1.005 : a_position;
-	gl_Position = project(i_center + position - vec2(0.0, a_raise * i_lift));
+	gl_Position = layer(project(i_center + position - vec2(0.0, a_raise * i_lift)), i_center.y);
 	v_local = position;
 	v_kind = a_kind;
 	v_along = a_along;
@@ -102,6 +118,7 @@ void main() {
 	v_surface = i_surface;
 	v_edges = i_edges;
 	v_slopes = i_slopes;
+	v_arms = i_arms;
 	v_nodes = i_outline.rgb;
 }`;
 
@@ -122,13 +139,17 @@ in vec2 v_world;
 flat in float v_surface;
 flat in float v_edges;
 flat in float v_slopes;
+flat in float v_arms;
 flat in vec3 v_nodes;
 out vec4 color;
-const vec3 SEAM = vec3(14.0, 15.0, 16.0) / 255.0;
-const vec3 HIGHLIGHT = vec3(134.0, 158.0, 207.0) / 255.0;
-const vec3 THIN = vec3(255.0, 248.0, 228.0) / 255.0;
-const vec3 ASPHALT = vec3(72.0, 70.0, 86.0) / 255.0;
-const vec3 PAINT = vec3(255.0, 222.0, 112.0) / 255.0;
+const vec3 SEAM = ${vec3(MAP.background)};
+const vec3 HIGHLIGHT = ${vec3(MAP.highlight)};
+const vec3 LINE = ${vec3(MAP.line)};
+const vec3 ASPHALT = ${vec3(MAP.asphalt)};
+const vec3 PAINT = ${vec3(MAP.paint)};
+const vec3 HEDGE = ${vec3(MAP.hedge)};
+const vec3 CROPS[${MAP.crops.length}] = vec3[${MAP.crops.length}](${MAP.crops.map(vec3)});
+${FLAGS}
 const vec2 NORMALS[6] = vec2[6](vec2(0.5, -0.8660254), vec2(1.0, 0.0), vec2(0.5, 0.8660254), vec2(-0.5, 0.8660254), vec2(-1.0, 0.0), vec2(-0.5, -0.8660254));
 vec3 dither(vec3 rgb) {
 	float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
@@ -222,17 +243,17 @@ vec3 farmland(vec2 w) {
 		}
 	}
 	vec2 h = hash2(id + 7.3);
-	vec3 crop = h.x < 0.35 ? vec3(96.0, 186.0, 74.0) : h.x < 0.6 ? vec3(158.0, 208.0, 72.0) : h.x < 0.85 ? vec3(240.0, 202.0, 92.0) : vec3(72.0, 164.0, 84.0);
+	vec3 crop = CROPS[h.x < 0.35 ? 0 : h.x < 0.6 ? 1 : h.x < 0.85 ? 2 : 3];
 	float angle = floor(h.y * 4.0) * 0.785398;
 	float u = dot(w, vec2(cos(angle), sin(angle))) / 0.16;
 	float aa = fwidth(u);
 	float f = fract(u);
 	float row = smoothstep(0.2 - aa, 0.2 + aa, f) * (1.0 - smoothstep(0.75 - aa, 0.75 + aa, f));
 	float grain = 0.6 * perlin(w * 14.0) + 0.4 * perlin(w * 33.0);
-	vec3 rgb = mix(crop * 0.72, crop, row) / 255.0 * (1.0 + grain * 0.06);
+	vec3 rgb = mix(crop * 0.72, crop, row) * (1.0 + grain * 0.06);
 	float edge = second - first;
 	float ea = fwidth(edge);
-	return mix(vec3(52.0, 128.0, 60.0) / 255.0, rgb, smoothstep(0.05 - ea, 0.05 + ea, edge));
+	return mix(HEDGE, rgb, smoothstep(0.05 - ea, 0.05 + ea, edge));
 }
 vec2 spot(int bits) {
 	int x = bits & 15;
@@ -248,7 +269,7 @@ vec3 paved(vec3 rgb, vec2 local, int edges, bool highway) {
 			nodes[k] = (k > 0 ? NORMALS[k - 1] * 1.7320508 : vec2(0.0)) + spot(bits);
 			highways[k] = (bits >> 7) == 1;
 		}
-		int arms = ((highway ? edges >> 12 : 0) | (edges >> 18)) & 63;
+		int arms = ((highway ? int(v_arms) >> 12 : 0) | (edges >> 18)) & 63;
 		int hubs = (int(v_nodes[2]) >> 8) & 127;
 		bool own = (roads & 1) == 1;
 		float road = own ? length(local - nodes[0]) - (highway ? 0.36 : 0.2) : 1e9;
@@ -285,20 +306,16 @@ void main() {
 		float edge = 0.8660254 - max(abs(v_local.x), max(abs(dot(v_local, vec2(0.5, 0.8660254))), abs(dot(v_local, vec2(0.5, -0.8660254)))));
 		float aa = fwidth(edge);
 		int packed = int(v_surface + 0.5);
-		int slots[3] = int[3]((packed / 1000) % 8, (packed / 8000) % 8, (packed / 64000) % 8);
-		bool mined = slots[0] == 3 || slots[1] == 3 || slots[2] == 3;
-		bool highway = slots[0] == 1 || slots[1] == 1 || slots[2] == 1;
-		g_rock = slots[0] == 6 || slots[1] == 6 || slots[2] == 6;
-		vec3 base = surface(float(packed % 100), v_world, v_local, v_top);
+		int variants = packed / 1000;
+		g_rock = (variants & SUNKER) != 0;
+		vec3 base = (variants & FARMLAND) != 0 ? farmland(v_world) : surface(float(packed % 1000), v_world, v_local, v_top);
 		int edges = int(v_edges);
-		for (int s = 0; s < 3; s++) {
-			if (slots[s] == 3) base = mine(v_local, v_world.y, base, (edges >> 12) & 63);
-			if (slots[s] == 5) base = farmland(v_world);
-			if (slots[s] != 4) continue;
+		if ((variants & MINE) != 0) base = mine(v_local, v_world.y, base, int(v_arms) & 63);
+		if ((variants & BEACH) != 0) {
 			vec3 sand = surface(${NAMES.indexOf('sand') + 1}.0, v_world, v_local, v_top);
 			float shore = 0.0;
 			for (int i = 0; i < 6; i++) {
-				if (((edges >> (12 + i)) & 1) == 0) continue;
+				if (((int(v_arms) >> (6 + i)) & 1) == 0) continue;
 				float distance = 0.8660254 - dot(v_local, NORMALS[i]);
 				float da = fwidth(distance);
 				float width = 0.2 + 0.05 * perlin(v_world * 3.0);
@@ -311,26 +328,30 @@ void main() {
 		float thin = 0.0;
 		float contour = 0.0;
 		float open = 1.0;
+		float thinWidth = mix(${float(BORDERS[THIN].width)}, ${float(BORDERS[THIN].focus)}, v_highlight);
+		float contourWidth = mix(${float(BORDERS[CONTOUR].width)}, ${float(BORDERS[CONTOUR].focus)}, v_highlight);
 		for (int i = 0; i < 6; i++) {
 			int kind = (edges >> (2 * i)) & 3;
 			float distance = 0.8660254 - dot(v_local, NORMALS[i]);
 			float da = fwidth(distance);
-			if (kind == 1 && !(mined && ((edges >> (12 + i)) & 1) == 1)) thin = max(thin, 1.0 - smoothstep(0.015 - da, 0.015 + da, distance));
-			if (kind != 1) open = min(open, distance);
-			if (kind == 2) contour = max(contour, 1.0 - smoothstep(0.08 - da, 0.08 + da, distance));
+			if (kind == ${THIN}) thin = max(thin, 1.0 - smoothstep(thinWidth - da, thinWidth + da, distance));
+			if ((kind & 1) == 0) open = min(open, distance);
+			if (kind == ${CONTOUR}) contour = max(contour, 1.0 - smoothstep(contourWidth - da, contourWidth + da, distance));
 		}
-		rgb = mix(rgb, THIN, thin * 0.4);
-		rgb = mix(rgb, THIN, contour);
-		rgb = paved(rgb, v_local, edges, highway);
+		vec3 line = mix(LINE, HIGHLIGHT, v_highlight);
+		rgb = mix(rgb, line, thin * mix(${float(BORDERS[THIN].alpha)}, 1.0, v_highlight));
+		rgb = mix(rgb, line, contour);
+		rgb = paved(rgb, v_local, edges, (variants & HIGHWAY) != 0);
 		color = vec4(dither(rgb), smoothstep(0.0, fwidth(open), open));
 	} else {
 		float seam = min(min(v_along, 1.0 - v_along), v_height);
 		float aa = fwidth(seam);
 		int edge = int(-v_kind + 0.5);
-		bool step = ((int(v_edges) >> (2 * edge)) & 3) == 1;
+		bool step = ((int(v_edges) >> (2 * edge)) & 1) == 1;
 		int packed = int(v_surface + 0.5);
-		vec3 top = (packed / 1000) % 8 == 5 || (packed / 8000) % 8 == 5 || (packed / 64000) % 8 == 5 ? farmland(v_world) : surface(float(packed % 100), v_world, v_local, v_top);
-		bool highway = (packed / 1000) % 8 == 1 || (packed / 8000) % 8 == 1 || (packed / 64000) % 8 == 1;
+		int variants = packed / 1000;
+		vec3 top = (variants & FARMLAND) != 0 ? farmland(v_world) : surface(float(packed % 1000), v_world, v_local, v_top);
+		bool highway = (variants & HIGHWAY) != 0;
 		bool sloped = ((int(v_slopes) >> edge) & 1) == 1;
 		vec3 side = step ? (sloped ? top : paved(top, v_local, int(v_edges), highway)) : mix(SEAM, v_side, smoothstep(0.02 - aa, 0.02 + aa, seam));
 		color = vec4(dither(side), 1.0);
@@ -343,6 +364,7 @@ in vec3 i_from;
 in vec3 i_to;
 in float i_wide;
 in vec2 i_bend;
+in float i_tile;
 ${PROJECT}
 out float v_across;
 out float v_along;
@@ -356,7 +378,7 @@ void main() {
 	if (wide >= 4) {
 		v_spot = a_corner * 0.7;
 		v_arms = vec4(i_to.xy, i_bend) - i_from.xyxy;
-		gl_Position = project(i_from.xy + v_spot - vec2(0.0, i_from.z));
+		gl_Position = layer(project(i_from.xy + v_spot - vec2(0.0, i_from.z)), i_tile);
 		return;
 	}
 	vec2 widths = vec2((wide & 1) == 1 ? 0.36 : 0.2, (wide & 2) == 2 ? 0.36 : 0.2);
@@ -365,7 +387,7 @@ void main() {
 	vec2 along = (i_to.xy - i_from.xy) / span;
 	float reach = a_corner.x < 0.0 ? -width : span + width;
 	vec3 point = mix(i_from, i_to, reach / span);
-	gl_Position = project(point.xy + vec2(-along.y, along.x) * a_corner.y * width - vec2(0.0, point.z));
+	gl_Position = layer(project(point.xy + vec2(-along.y, along.x) * a_corner.y * width - vec2(0.0, point.z)), i_tile);
 	v_across = a_corner.y * width;
 	v_along = reach;
 	v_length = span;
@@ -381,8 +403,8 @@ flat in float v_wide;
 flat in vec4 v_arms;
 uniform float u_paint;
 out vec4 color;
-const vec3 ASPHALT = vec3(72.0, 70.0, 86.0) / 255.0;
-const vec3 PAINT = vec3(255.0, 222.0, 112.0) / 255.0;
+const vec3 ASPHALT = ${vec3(MAP.asphalt)};
+const vec3 PAINT = ${vec3(MAP.paint)};
 float arm(vec2 p, vec2 b) {
 	return length(p - b * clamp(dot(p, b) / dot(b, b), 0.0, 1.0));
 }
@@ -415,6 +437,7 @@ const TREE_VERTEX = `#version 300 es
 in vec2 a_corner;
 in vec3 i_root;
 in vec3 i_tree;
+in float i_tile;
 uniform float u_shadow;${SPRITE_CONSTANTS}
 ${PROJECT}
 out vec2 v_offset;
@@ -436,6 +459,7 @@ void main() {
 		v_offset = offset;
 		v_uv = uv;
 	}
+	gl_Position = layer(gl_Position, i_tile);
 	v_seed = i_tree.y;
 	v_kind = i_tree.z;
 }`;
@@ -473,13 +497,13 @@ vec4 rock(vec2 p, float seed) {
 		float d = s * cross2(b - a, p - a) / length(b - a);
 		float lit = 0.95 + 0.35 * dot(normalize((a + b) / 2.0 - peak), light);
 		float seam = min(abs(cross2(normalize(a - peak), p - peak)), abs(cross2(normalize(b - peak), p - peak)));
-		return vec4(vec3(150.0, 144.0, 156.0) / 255.0 * lit * mix(0.85, 1.0, smoothstep(0.0, 0.012, seam)), smoothstep(-aa, aa, d) * smoothstep(0.0, -0.3, p.y));
+		return vec4(${vec3(MAP.rock)} * lit * mix(0.85, 1.0, smoothstep(0.0, 0.012, seam)), smoothstep(-aa, aa, d) * smoothstep(0.0, -0.3, p.y));
 	}
 	return vec4(0.0);
 }
 void main() {
 	if (u_shadow > 0.5) {
-		color = vec4(0.0, 0.0, 0.0, (1.0 - smoothstep(0.3, 1.0, length(v_offset))) * 0.3);
+		color = vec4(${vec3(MAP.shadow)}, (1.0 - smoothstep(0.3, 1.0, length(v_offset))) * 0.3);
 		return;
 	}
 	if (v_kind > 1.5) {
@@ -515,12 +539,6 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string) {
 	gl.compileShader(shader);
 	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(shader));
 	return shader;
-}
-
-export function rgb(color: string) {
-	const hex = color.replace('#', '');
-	const full = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
-	return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
 }
 
 function link(gl: WebGL2RenderingContext, vertex: string, fragment: string) {
@@ -570,6 +588,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_surface', 1, STRIDE, 14, 1);
 	attribute('i_edges', 1, STRIDE, 15, 1);
 	attribute('i_slopes', 1, STRIDE, 16, 1);
+	attribute('i_arms', 1, STRIDE, 17, 1);
 
 	const grove = gl.createVertexArray();
 	gl.bindVertexArray(grove);
@@ -580,6 +599,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	gl.bindBuffer(gl.ARRAY_BUFFER, trees);
 	attribute('i_root', 3, TREE_STRIDE, 0, 1, forest);
 	attribute('i_tree', 3, TREE_STRIDE, 3, 1, forest);
+	attribute('i_tile', 1, TREE_STRIDE, 6, 1, forest);
 	let planted = 0;
 
 	const road = gl.createVertexArray();
@@ -593,6 +613,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_to', 3, RAMP_STRIDE, 3, 1, asphalt);
 	attribute('i_wide', 1, RAMP_STRIDE, 6, 1, asphalt);
 	attribute('i_bend', 2, RAMP_STRIDE, 7, 1, asphalt);
+	attribute('i_tile', 1, RAMP_STRIDE, 9, 1, asphalt);
 	let paved = 0;
 
 	gl.useProgram(forest);
@@ -616,8 +637,10 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	});
 
 	gl.enable(gl.BLEND);
+	gl.enable(gl.DEPTH_TEST);
+	gl.depthFunc(gl.LEQUAL);
 	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-	gl.clearColor(14 / 255, 15 / 255, 16 / 255, 1);
+	gl.clearColor(...(rgb(MAP.background) as [number, number, number]), 1);
 
 	const uniforms = (set: (uniform: (name: string) => WebGLUniformLocation | null) => void) => {
 		for (const each of [program, forest, asphalt]) {
@@ -638,6 +661,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 				gl.uniform2f(uniform('u_plane'), plane.width, plane.height);
 				gl.uniform2f(uniform('u_screen'), screen.width, screen.height);
 				gl.uniform3f(uniform('u_camera'), camera.perspective, Math.cos(radians), Math.sin(radians));
+				gl.uniform2f(uniform('u_depth'), -plane.y / plane.scale, plane.height / plane.scale);
 			});
 		},
 		plant(data) {
@@ -651,13 +675,15 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			paved = data.length / RAMP_STRIDE;
 		},
 		draw(data: Float32Array, time = 0) {
-			gl.clear(gl.COLOR_BUFFER_BIT);
+			gl.depthMask(true);
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 			gl.useProgram(program);
 			gl.uniform1f(gl.getUniformLocation(program, 'u_time'), time);
 			gl.bindVertexArray(vao);
 			gl.bindBuffer(gl.ARRAY_BUFFER, instances);
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, shape.length / 5, data.length / STRIDE);
+			gl.depthMask(false);
 			if (paved) {
 				gl.useProgram(asphalt);
 				gl.bindVertexArray(road);
@@ -676,6 +702,9 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 				gl.uniform1f(shadow, pass);
 				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, planted);
 			}
+		},
+		destroy() {
+			gl.getExtension('WEBGL_lose_context')?.loseContext();
 		}
 	};
 }
@@ -723,7 +752,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	const shade = (color: number[], light: number) => `rgb(${color.map((c) => c * light).join(' ')})`;
 
 	const road = (cx: number, cy: number, data: Float32Array, o: number) => {
-		const arms = ((((data[o + 9] >> 7) & 1) === 1 ? data[o + 15] >> 12 : 0) | (data[o + 15] >> 18)) & 63;
+		const arms = ((((data[o + 9] >> 7) & 1) === 1 ? data[o + 17] >> 12 : 0) | (data[o + 15] >> 18)) & 63;
 		const nodes = Array.from({ length: 7 }, (_, k) => {
 			const bits = (data[o + 9 + Math.floor(k / 3)] >> (8 * (k % 3))) & 255;
 			const [x, y] = k > 0 ? [CORNERS[k - 1][0] + CORNERS[k % 6][0], CORNERS[k - 1][1] + CORNERS[k % 6][1]] : [0, 0];
@@ -749,7 +778,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			if (linked(i + 1) && !longest(i + 1, next, 0)) pairs.push([i + 1, next]);
 			if (linked(i + 1) && !longest(i + 1, next, 0) && !longest(0, i + 1, next) && !longest(0, next, i + 1)) {
 				path([nodes[0], nodes[i + 1], nodes[next]].map(({ x, y }) => [x, y]));
-				context.fillStyle = 'rgb(72 70 86)';
+				context.fillStyle = css(MAP.asphalt);
 				context.fill();
 			}
 		}
@@ -766,9 +795,9 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.stroke();
 			context.lineCap = 'butt';
 		};
-		stroke(false, 0.4, 'rgb(72 70 86)');
-		stroke(true, 0.72, 'rgb(72 70 86)');
-		stroke(true, 0.05, 'rgb(255 222 112)');
+		stroke(false, 0.4, css(MAP.asphalt));
+		stroke(true, 0.72, css(MAP.asphalt));
+		stroke(true, 0.05, css(MAP.paint));
 	};
 
 	const inset = (cx: number, cy: number, open: boolean[], depth: number) => {
@@ -840,51 +869,50 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			});
 			context.moveTo(...project(ground[0][0], ground[0][1]));
 			for (const [x, y] of ground) context.lineTo(...project(x, y));
-			context.strokeStyle = 'rgb(14 15 16)';
+			context.strokeStyle = css(MAP.background);
 			context.lineWidth = 0.04 * scale;
 			context.stroke();
 			context.restore();
 			for (let j = 0; j < FRONT.length - 1; j++) {
-				if (((data[o + 15] >> (2 * (j + 1))) & 3) !== THIN) continue;
+				if (((data[o + 15] >> (2 * (j + 1))) & 1) === 0) continue;
 				path([raised[j], raised[j + 1], ground[j + 1], ground[j]]);
-				context.fillStyle = `rgb(${[...data.subarray(o + 3, o + 6)].map((c) => c * 255).join(' ')})`;
+				context.fillStyle = color(data, o + 3);
 				context.fill();
 			}
 		}
-		const slots = [1000, 8000, 64000].map((unit) => Math.floor(data[o + 14] / unit) % 8);
-		const mined = slots.includes(3);
+		const variants = Math.floor(data[o + 14] / 1000);
+		const focus = highlight && data[o + 13] > 0;
 		path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
 		context.fillStyle = color(data, o + 3);
 		context.fill();
-		for (const slot of slots) {
-			if (slot === 3) {
-				mine(cx, cy - lift, [...data.subarray(o + 3, o + 6)].map((c) => c * 255), (data[o + 15] >> 12) & 63);
-				path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
+		if (variants & flag('farmland')) {
+			context.save();
+			context.clip();
+			context.fillStyle = css(MAP.field);
+			context.fill();
+			context.strokeStyle = css(MAP.crops[0]);
+			context.lineWidth = 0.13 * scale;
+			for (let k = -12; k <= 12; k++) {
+				const [a, b] = [-4, 4].map((t) => project(cx + 0.9397 * t - 0.342 * k * 0.2, cy - lift + 0.342 * t + 0.9397 * k * 0.2));
+				context.beginPath();
+				context.moveTo(...a);
+				context.lineTo(...b);
+				context.stroke();
 			}
-			if (slot === 5) {
-				context.save();
-				context.clip();
-				context.fillStyle = 'rgb(69 134 53)';
-				context.fill();
-				context.strokeStyle = 'rgb(96 186 74)';
-				context.lineWidth = 0.13 * scale;
-				for (let k = -12; k <= 12; k++) {
-					const [a, b] = [-4, 4].map((t) => project(cx + 0.9397 * t - 0.342 * k * 0.2, cy - lift + 0.342 * t + 0.9397 * k * 0.2));
-					context.beginPath();
-					context.moveTo(...a);
-					context.lineTo(...b);
-					context.stroke();
-				}
-				context.restore();
-			}
-			if (slot !== 4) continue;
+			context.restore();
+		}
+		if (variants & flag('mine')) {
+			mine(cx, cy - lift, [...data.subarray(o + 3, o + 6)].map((c) => c * 255), data[o + 17] & 63);
+			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
+		}
+		if (variants & flag('beach')) {
 			const sand = BASES.sand.flat;
 			context.save();
 			context.clip();
 			context.strokeStyle = sand;
 			context.lineWidth = 0.4 * scale;
 			for (let i = 0; i < 6; i++) {
-				if (((data[o + 15] >> (12 + i)) & 1) === 0) continue;
+				if (((data[o + 17] >> (6 + i)) & 1) === 0) continue;
 				const [a, b] = [CORNERS[i], CORNERS[(i + 1) % 6]];
 				context.beginPath();
 				context.moveTo(...project(cx + a[0], cy + a[1] - lift));
@@ -893,8 +921,8 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			}
 			context.restore();
 		}
-		if (highlight && data[o + 13] > 0) {
-			context.fillStyle = `rgb(134 158 207 / ${data[o + 13] * 0.3})`;
+		if (focus) {
+			context.fillStyle = css(MAP.highlight, data[o + 13] * 0.3);
 			context.fill();
 		}
 		context.save();
@@ -908,28 +936,61 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			if (edge === 6 && (data[o + 11] >> 15) & 127) road(cx, cy - lift, data, o);
 			const kind = (data[o + 15] >> (2 * (edge % 6))) & 3;
 			if (kind !== (edge < 6 ? THIN : CONTOUR)) continue;
-			if (mined && edge < 6 && (data[o + 15] >> (12 + edge)) & 1) continue;
 			const border = BORDERS[kind];
 			const [a, b] = [CORNERS[edge % 6], CORNERS[(edge + 1) % 6]];
 			context.beginPath();
 			context.moveTo(...project(cx + a[0], cy + a[1] - lift));
 			context.lineTo(...project(cx + b[0], cy + b[1] - lift));
-			context.strokeStyle = border.color;
-			context.lineWidth = border.width * 2 * scale;
+			context.strokeStyle = focus ? css(MAP.highlight) : css(MAP.line, border.alpha);
+			context.lineWidth = (focus ? border.focus : border.width) * 2 * scale;
 			context.stroke();
 		}
 		context.restore();
 	};
 
+	const taper = (wide: number, t: number) => {
+		if (wide === 3 || wide === 0) return wide === 3 ? 0.36 : 0.2;
+		const x = Math.min(1, Math.max(0, (wide === 1 ? t : 1 - t) / 0.3));
+		return 0.36 - 0.16 * x * x * (3 - 2 * x);
+	};
+
+	const fillet = (at: number[], a: number[], b: number[], wa: number, wb: number, lift: number) => {
+		const unit = ([x, y]: number[]) => [(x - at[0]) / Math.hypot(x - at[0], y - at[1]), (y - at[1]) / Math.hypot(x - at[0], y - at[1])];
+		const [da, db] = [unit(a), unit(b)];
+		const toward = ([x, y]: number[], [ox, oy]: number[]) => (-y * ox + x * oy < 0 ? [y, -x] : [-y, x]);
+		const [na, nb] = [toward(da, db), toward(db, da)];
+		const det = db[0] * da[1] - da[0] * db[1];
+		if (Math.abs(det) < 1e-6) return;
+		const [dx, dy] = [nb[0] * wb - na[0] * wa, nb[1] * wb - na[1] * wa];
+		const s = (db[0] * dy - dx * db[1]) / det;
+		const corner = [at[0] + na[0] * wa + da[0] * s, at[1] + na[1] * wa + da[1] * s];
+		const point = (d: number[]) => project(corner[0] + d[0] * 0.15, corner[1] + d[1] * 0.15 - lift);
+		context.beginPath();
+		context.moveTo(...project(corner[0], corner[1] - lift));
+		context.lineTo(...point(da));
+		context.quadraticCurveTo(...project(corner[0], corner[1] - lift), ...point(db));
+		context.closePath();
+		context.fill();
+	};
+
 	const ramps = () => {
+		context.fillStyle = css(MAP.asphalt);
 		for (let i = 0; i < paved.length; i += RAMP_STRIDE) {
-			const [x0, y0, l0, x1, y1, l1, wide] = paved.subarray(i, i + RAMP_STRIDE);
+			const [x0, y0, l0, x1, y1, l1, wide, bx, by] = paved.subarray(i, i + RAMP_STRIDE);
+			if (wide >= 4) {
+				fillet([x0, y0], [x1, y1], [bx, by], wide & 1 ? 0.36 : 0.2, wide & 2 ? 0.36 : 0.2, l0);
+				continue;
+			}
 			if (l0 === l1) continue;
 			const length = Math.hypot(x1 - x0, y1 - y0);
-			const width = wide === 3 ? 0.36 : 0.2;
-			const [px, py] = [((y0 - y1) / length) * width, ((x1 - x0) / length) * width];
-			path([[x0 + px, y0 + py - l0], [x1 + px, y1 + py - l1], [x1 - px, y1 - py - l1], [x0 - px, y0 - py - l0]]);
-			context.fillStyle = 'rgb(72 70 86)';
+			const [nx, ny] = [(y0 - y1) / length, (x1 - x0) / length];
+			const side = (sign: number) =>
+				Array.from({ length: 21 }, (_, k) => {
+					const t = k / 20;
+					const width = taper(wide, t) * sign;
+					return [x0 + (x1 - x0) * t + nx * width, y0 + (y1 - y0) * t + ny * width - l0 - (l1 - l0) * t];
+				});
+			path([...side(1), ...side(-1).toReversed()]);
 			context.fill();
 		}
 	};
@@ -939,7 +1000,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			const [x, y, lift, size] = planted.subarray(i, i + 4);
 			if (planted[i + 5] > 0.5 && planted[i + 5] < TREE - 0.5) continue;
 			path(Array.from({ length: 16 }, (_, k) => [x + Math.cos((k / 8) * Math.PI) * 0.2 * size, y - lift + Math.sin((k / 8) * Math.PI) * 0.08 * size]));
-			context.fillStyle = 'rgb(0 0 0 / 0.2)';
+			context.fillStyle = css(MAP.shadow, 0.2);
 			context.fill();
 		}
 		for (let i = 0; i < planted.length; i += TREE_STRIDE) {
@@ -949,7 +1010,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			if (kind > 1.5) {
 				const sprite = sprites[Math.round(kind) - 2];
 				const { size: [width, height], anchor, unit, flat } = SPRITES[Math.round(kind) - 2];
-				if (!sprite.complete) continue;
+				if (!sprite.complete || !sprite.naturalWidth) continue;
 				context.save();
 				if (flat) {
 					const corner = (u: number, v: number) => project(x + (u - anchor[0]) * unit * size, y - lift + (v - anchor[1]) * unit * size);
@@ -979,8 +1040,9 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 					for (const [px, py] of [peak, a, b]) context.lineTo(rx + px * span, ry + py * span);
 					context.closePath();
 					const fade = context.createLinearGradient(0, ry - 0.3 * span, 0, ry);
-					fade.addColorStop(0, shade([60, 61, 63], lit));
-					fade.addColorStop(1, shade([60, 61, 63], lit).replace(')', ' / 0)'));
+					const rock = rgb(MAP.rock).map((c) => c * 255);
+					fade.addColorStop(0, shade(rock, lit));
+					fade.addColorStop(1, shade(rock, lit).replace(')', ' / 0)'));
 					context.fillStyle = fade;
 					context.fill();
 				});
@@ -1020,7 +1082,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			const lit = [];
 			for (let i = 0; i < count; i++) if (data[i * STRIDE + 13] > 0) lit.push(i);
 			if (stale) {
-				context.fillStyle = 'rgb(14 15 16)';
+				context.fillStyle = css(MAP.background);
 				context.fillRect(0, 0, canvas.width, canvas.height);
 				reach = 0;
 				for (let i = 0; i < count; i++) {
@@ -1049,7 +1111,8 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				forest();
 				context.restore();
 			}
-		}
+		},
+		destroy() {}
 	};
 	return renderer;
 }

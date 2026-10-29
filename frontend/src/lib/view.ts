@@ -27,10 +27,23 @@ export function frame(tiles: PlacedTile[], width: number, height: number): Plane
 	};
 }
 
-export function grid({ width, height, scale, x, y }: Plane) {
+export function unprojector(plane: Plane, width: number, height: number) {
+	const radians = (TILT * Math.PI) / 180;
+	return (sx: number, sy: number): Point => {
+		const v = sy - height / 2;
+		const ry = v / (Math.cos(radians) + (v * Math.sin(radians)) / PERSPECTIVE);
+		const rx = (sx - width / 2) * (1 - (ry * Math.sin(radians)) / PERSPECTIVE);
+		return [(rx + plane.width / 2 - plane.x) / plane.scale, (ry + plane.height / 2 - plane.y) / plane.scale];
+	};
+}
+
+export function grid(plane: Plane, width: number, height: number, reach = 0) {
+	const unproject = unprojector(plane, width, height);
+	const corners = [unproject(0, 0), unproject(width, 0), unproject(0, height), unproject(width, height)];
+	const [xs, ys] = [corners.map(([x]) => x), corners.map(([, y]) => y)];
 	return {
-		rows: [Math.floor(-y / scale / (HEIGHT * 0.75)) - 1, Math.ceil((height - y) / scale / (HEIGHT * 0.75)) + 2],
-		cols: [Math.floor(-x / scale / WIDTH) - 1, Math.ceil((width - x) / scale / WIDTH) + 1]
+		rows: [Math.floor(Math.min(...ys) / (HEIGHT * 0.75)) - 1, Math.ceil((Math.max(...ys) + reach) / (HEIGHT * 0.75)) + 1],
+		cols: [Math.floor(Math.min(...xs) / WIDTH) - 1, Math.ceil(Math.max(...xs) / WIDTH) + 1]
 	};
 }
 
@@ -56,16 +69,17 @@ export function table(tiles: PlacedTile[], width: number, height: number) {
 export function halo(tiles: PlacedTile[], width: number, height: number) {
 	const { scale, rise } = placement(tiles, width, height);
 	const point = ([x, y]: Point) => `${width / 2 + (x - width / 2) * scale} ${height / 2 + (y - height / 2) * scale * FLATTEN - rise}`;
-	return island(tiles, width, height, floor(tiles))
+	return island(tiles, width, height)
 		.map((polygon) => 'M' + polygon.map(point).join('L') + 'Z')
 		.join('');
 }
 
-export function island(tiles: PlacedTile[], width: number, height: number, floor = 0) {
+export function island(tiles: PlacedTile[], width: number, height: number) {
 	const project = projector(frame(tiles, width, height), width, height);
+	const bottom = floor(tiles);
 	return tiles.map(({ x, y, tile }) => {
 		const lift = tile.height * LIFT;
-		return CORNERS.map(([cx, cy], i) => project(x + cx, y + cy - (i === 0 || i === 1 || i === 5 ? lift : Math.min(floor, lift))));
+		return CORNERS.map(([cx, cy], i) => project(x + cx, y + cy - (i === 0 || i === 1 || i === 5 ? lift : Math.min(bottom, lift))));
 	});
 }
 
@@ -76,7 +90,7 @@ function floor(tiles: PlacedTile[]) {
 const path = (points: Point[]) => 'M' + points.map(([x, y]) => `${Math.round(x)} ${Math.round(y)}`).join('L') + 'Z';
 
 export function footprint(tiles: PlacedTile[], width: number, height: number) {
-	return `path('${island(tiles, width, height, floor(tiles)).map(path).join('')}')`;
+	return `path('${island(tiles, width, height).map(path).join('')}')`;
 }
 
 export function inside(polygons: Point[][], [px, py]: Point) {
@@ -89,9 +103,10 @@ export function inside(polygons: Point[][], [px, py]: Point) {
 }
 
 export function reveal(tiles: PlacedTile[], width: number, height: number) {
+	if (!width || !height) return { grow: [], spread: [] };
 	const plane = frame(tiles, width, height);
 	const project = projector(plane, width, height);
-	const { rows, cols } = grid(plane);
+	const { rows, cols } = grid(plane, width, height);
 	const lift = floor(tiles) / 2;
 	const distance = new Map(tiles.map((t) => [`${t.row},${t.col}`, 0]));
 	const queue = tiles.map((t) => [t.row, t.col]);
@@ -114,7 +129,7 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 		return [x + CORNERS[i % 6][0], y + CORNERS[i % 6][1]];
 	};
 	const key = ([x, y]: number[]) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
-	const spread: Keyframe[] = [{ clipPath: footprint(tiles, width, height), offset: 0, easing: 'step-end' }];
+	const spread: Keyframe[] = [{ '--clip': footprint(tiles, width, height), offset: 0, easing: 'step-end' }];
 	for (let k = 1; k <= rings; k++) {
 		const edges = new Map<string, number[][]>();
 		for (const [cell, d] of distance) {
@@ -140,9 +155,9 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 				shape += path(loop);
 			}
 		}
-		spread.push({ clipPath: `path('${shape}')`, offset: 0.5 + (0.5 * k) / (rings + 1), easing: 'step-end' });
+		spread.push({ '--clip': `path('${shape}')`, offset: 0.5 + (0.5 * k) / (rings + 1), easing: 'step-end' });
 	}
-	spread.push({ clipPath: 'inset(0)', offset: 1 });
+	spread.push({ '--clip': 'inset(0)', offset: 1 });
 	const grow: Keyframe[] = [
 		{ transform: table(tiles, width, height), offset: 0, easing: 'cubic-bezier(0.6, 0, 0.3, 1)' },
 		{ transform: 'none', offset: 0.5 },

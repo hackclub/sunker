@@ -1,19 +1,20 @@
+<script module lang="ts">
+	const WIDTH = 64;
+	const GAP = 16;
+	const DROP = WIDTH / Math.sqrt(3);
+	const RADIUS = 6;
+	export const DIALOG_WIDTH = 480;
+
+	const span = (count: number) => count * WIDTH + (count - 1) * GAP + 2 * (DROP + GAP);
+	export const offset = (count: number, index: number) => DROP + GAP + index * (WIDTH + GAP) - span(count) / 2;
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	let {
-		side,
-		open = false,
-		children,
-		dialog
-	}: { side: 'left' | 'right'; open?: boolean; children?: Snippet; dialog?: Snippet } = $props();
+	let { side, open = false, count, dialog }: { side: 'left' | 'right'; open?: boolean; count: number; dialog?: Snippet } = $props();
 
-	const WIDTH = 64;
-	const DROP = WIDTH / Math.sqrt(3);
-	const RADIUS = 6;
-	const DIALOG_WIDTH = 480;
-
-	let height = $state(0);
+	const height = $derived(span(count));
 
 	function toward([px, py]: number[], [qx, qy]: number[]) {
 		const len = Math.hypot(qx - px, qy - py);
@@ -40,17 +41,13 @@
 	class="panel {side}"
 	class:open
 	style:--width="{WIDTH}px"
-	style:--drop="{DROP}px"
 	style:--dialog-width="{DIALOG_WIDTH}px"
-	bind:clientHeight={height}
+	style:height="{height}px"
 >
 	<svg width={WIDTH} {height}>
 		<path class="fill" d="{outline} Z" />
 		<path class="border" d={outline} />
 	</svg>
-	<div class="content">
-		{@render children?.()}
-	</div>
 </div>
 
 <style>
@@ -93,16 +90,8 @@
 
 	.border {
 		fill: none;
-		stroke: #0e0f10;
+		stroke: var(--background);
 		stroke-width: 2;
-	}
-
-	.content {
-		position: relative;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-		padding: calc(var(--drop) + 16px) 0;
 	}
 
 	.dialog {
@@ -113,7 +102,7 @@
 		box-sizing: border-box;
 		width: var(--dialog-width);
 		overflow: auto;
-		border: 2px solid #0e0f10;
+		border: 2px solid var(--background);
 		border-radius: 6px;
 		background: var(--island);
 		transition: transform 0.25s ease;
