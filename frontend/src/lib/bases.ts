@@ -5,6 +5,10 @@ export interface Base {
 }
 
 export const LIBRARY = `
+uniform float u_time;
+vec2 g_flow = vec2(0.327, 0.945);
+vec2 g_flows[7];
+float g_weights[7];
 vec2 hash2(vec2 p) {
 	p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
 	return fract(sin(p) * 43758.5453);
@@ -132,41 +136,21 @@ float grass_blade(vec2 q, float side, float radius) {
 	},
 	ocean: {
 		flat: '#305375',
-		functions: `
-bool ocean_inside(vec2 p) {
-	return 0.8 - max(abs(p.x), max(abs(dot(p, vec2(0.5, 0.8660254))), abs(dot(p, vec2(0.5, -0.8660254))))) >= 0.0;
-}`,
 		glsl: `
-	vec2 seed = floor((world - local) / vec2(0.8660254, 1.5) + 0.5) * 7.31;
-	float row = floor(local.y / 0.15);
-	float shift = hash2(vec2(row, 0.0) + seed).x * 0.7;
-	vec2 id = vec2(floor((local.x + shift) / 0.7), row);
-	vec2 h = hash2(id + seed);
-	vec3 color = vec3(48.0, 83.0, 117.0) / 255.0;
-	float arcs = 4.0 + floor(fract(h.y * 9.1) * 4.0);
-	float radii[7];
-	float span = 0.0;
-	for (int k = 0; k < 7; k++) {
-		radii[k] = float(k) < arcs ? 0.025 + 0.02 * hash2(id + seed + float(k) * 13.7).x : 0.0;
-		span += 2.0 * radii[k];
+	vec2 p = world * 1.6;
+	float warp = perlin(p * 0.5 + vec2(u_time * 0.04, 0.0)) * 2.2 + perlin(p * 1.3 + 11.0 - vec2(0.0, u_time * 0.07)) * 0.6;
+	float wave = 0.0;
+	float total = 0.0;
+	for (int i = 0; i < 7; i++) {
+		if (g_weights[i] <= 0.0) continue;
+		wave += g_weights[i] * (0.5 + 0.5 * sin(dot(p, g_flows[i]) * 2.75 + warp * 2.0 - u_time * 0.9));
+		total += g_weights[i];
 	}
-	vec2 start = vec2(id.x * 0.7 - shift + h.x * (0.7 - span), (row + 0.5) * 0.15);
-	bool shown = fract(h.x * 4.17) < 0.8 && ocean_inside(start + vec2(0.0, -0.05)) && ocean_inside(start + vec2(0.0, 0.05)) && ocean_inside(start + vec2(span, -0.05)) && ocean_inside(start + vec2(span, 0.05));
-	vec2 p = local - start;
-	float waves = 1e9;
-	float along = 0.0;
-	float side = -1.0;
-	for (int k = 0; k < 7; k++) {
-		if (!shown || float(k) >= arcs) break;
-		float radius = radii[k];
-		vec2 v = p - vec2(along + radius, 0.0);
-		float d = v.y * side >= 0.0 ? abs(length(v) - radius) : min(length(v + vec2(radius, 0.0)), length(v - vec2(radius, 0.0)));
-		waves = min(waves, d);
-		along += 2.0 * radius;
-		side = -side;
-	}
-	float aa = length(fwidth(local));
-	return mix(vec3(54.0, 99.0, 128.0) / 255.0, color, smoothstep(0.012 - aa, 0.012 + aa, waves));`
+	wave /= total;
+	float ramp = smoothstep(0.15, 0.95, wave);
+	vec3 color = mix(vec3(48.0, 83.0, 117.0), vec3(54.0, 99.0, 128.0), ramp) / 255.0;
+	float grain = 0.6 * perlin(world * 9.0 + u_time * 0.15) + 0.4 * perlin(world * 23.0 - u_time * 0.2);
+	return color * (1.0 + grain * 0.035);`
 	}
 };
 

@@ -5,8 +5,10 @@ import building1 from '#lib/assets/images/building1.png';
 import building2 from '#lib/assets/images/building2.png';
 import house1 from '#lib/assets/images/house1.png';
 import house2 from '#lib/assets/images/house2.png';
+import tree from '#lib/assets/images/tree.png';
+import cactus from '#lib/assets/images/cactus.png';
 
-export const STRIDE = 16;
+export const STRIDE = 17;
 export const THIN = 1;
 export const CONTOUR = 2;
 export const TREE_STRIDE = 6;
@@ -16,8 +18,13 @@ const SPRITES = [
 	{ src: building1, size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
 	{ src: building2, size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
 	{ src: house1, size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
-	{ src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false }
+	{ src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
+	{ src: tree, size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
+	{ src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false }
 ];
+const spriteKind = (src: string) => 2 + SPRITES.findIndex((sprite) => sprite.src === src);
+export const TREE = spriteKind(tree);
+export const CACTUS = spriteKind(cactus);
 const float = (n: number) => (Number.isInteger(n) ? `${n}.0` : `${n}`);
 const SPRITE_CONSTANTS = `
 const vec2 SPRITE_SIZES[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES.map(({ size }) => `vec2(${size.map(float)})`)});
@@ -25,7 +32,7 @@ const vec2 SPRITE_ANCHORS[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES
 const float SPRITE_UNITS[${SPRITES.length}] = float[${SPRITES.length}](${SPRITES.map(({ unit }) => float(unit))});
 const bool SPRITE_FLAT[${SPRITES.length}] = bool[${SPRITES.length}](${SPRITES.map(({ flat }) => flat)});`;
 
-const BORDERS = { [THIN]: { width: 0.015, color: 'rgb(180 184 191)' }, [CONTOUR]: { width: 0.08, color: 'rgb(255 255 255)' } };
+const BORDERS: Record<number, { width: number; color: string }> = { [THIN]: { width: 0.015, color: 'rgb(180 184 191 / 0.4)' }, [CONTOUR]: { width: 0.08, color: 'rgb(255 255 255)' } };
 
 type Screen = { width: number; height: number; ratio: number };
 type Plane = { width: number; height: number; scale: number; x: number; y: number };
@@ -35,7 +42,7 @@ export interface Renderer {
 	animated: boolean;
 	resize(screen: Screen, plane: Plane, camera: Camera): void;
 	plant(trees: Float32Array): void;
-	draw(data: Float32Array): void;
+	draw(data: Float32Array, time?: number): void;
 }
 
 const PROJECT = `
@@ -63,6 +70,7 @@ in vec4 i_outline;
 in float i_highlight;
 in float i_surface;
 in float i_edges;
+in float i_flows;
 ${PROJECT}
 out vec2 v_local;
 out float v_kind;
@@ -75,6 +83,7 @@ out float v_highlight;
 out vec2 v_world;
 flat out float v_surface;
 flat out float v_edges;
+flat out float v_flows;
 flat out vec3 v_nodes;
 void main() {
 	vec2 position = a_kind > 0.5 ? a_position * 1.005 : a_position;
@@ -90,6 +99,7 @@ void main() {
 	v_world = i_center + position;
 	v_surface = i_surface;
 	v_edges = i_edges;
+	v_flows = i_flows;
 	v_nodes = i_outline.rgb;
 }`;
 
@@ -109,6 +119,7 @@ in float v_highlight;
 in vec2 v_world;
 flat in float v_surface;
 flat in float v_edges;
+flat in float v_flows;
 flat in vec3 v_nodes;
 out vec4 color;
 const vec3 SEAM = vec3(14.0, 15.0, 16.0) / 255.0;
@@ -182,6 +193,20 @@ vec3 mine(vec2 p, float y, vec3 rgb, int bits) {
 	}
 	return result;
 }
+vec3 farmland(vec2 w) {
+	vec2 d = vec2(0.9397, 0.342);
+	vec2 n = vec2(-d.y, d.x);
+	float along = dot(w, d);
+	float warp = sin(along * 5.0 + perlin(w * 1.5) * 2.5) * 0.06 + sin(along * 11.0 + 1.7) * 0.015;
+	float u = (dot(w, n) + warp) / 0.2;
+	float f = fract(u);
+	float aa = fwidth(u);
+	float stripe = smoothstep(0.15 - aa, 0.15 + aa, f) * (1.0 - smoothstep(0.7 - aa, 0.7 + aa, f));
+	vec3 soil = vec3(143.0, 86.0, 59.0) / 255.0;
+	vec3 crop = vec3(122.0, 140.0, 52.0) / 255.0;
+	float grain = 0.6 * perlin(w * 14.0) + 0.4 * perlin(w * 33.0);
+	return mix(soil, crop, stripe) * (1.0 + grain * 0.06);
+}
 vec3 surface(float id, vec2 world, vec2 local, vec3 top) {
 	if (id < 0.5) return top;
 ${DISPATCH}
@@ -192,10 +217,36 @@ void main() {
 		float edge = 0.8660254 - max(abs(v_local.x), max(abs(dot(v_local, vec2(0.5, 0.8660254))), abs(dot(v_local, vec2(0.5, -0.8660254)))));
 		float aa = fwidth(edge);
 		int packed = int(v_surface + 0.5);
-		int variant = packed / 100;
+		int flow = (packed / 100) % 10;
+		int slots[3] = int[3]((packed / 1000) % 8, (packed / 8000) % 8, (packed / 64000) % 8);
+		bool mined = slots[0] == 3 || slots[1] == 3 || slots[2] == 3;
+		bool highway = slots[0] == 1 || slots[1] == 1 || slots[2] == 1;
+		g_flow = flow > 0 ? NORMALS[flow - 1] : vec2(0.327, 0.945);
+		g_flows[0] = g_flow;
+		g_weights[0] = 1.0;
+		int flows = flow > 0 ? int(v_flows) : 0;
+		for (int i = 0; i < 6; i++) {
+			int other = (flows >> (3 * i)) & 7;
+			g_flows[i + 1] = other > 0 ? NORMALS[other - 1] : g_flow;
+			g_weights[i + 1] = other > 0 ? max(0.0, 1.0 - (0.8660254 - dot(v_local, NORMALS[i])) / 0.8) : 0.0;
+		}
 		vec3 base = surface(float(packed % 100), v_world, v_local, v_top);
 		int edges = int(v_edges);
-		if (variant == 3) base = mine(v_local, v_world.y, base, (edges >> 12) & 63);
+		for (int s = 0; s < 3; s++) {
+			if (slots[s] == 3) base = mine(v_local, v_world.y, base, (edges >> 12) & 63);
+			if (slots[s] == 5) base = farmland(v_world);
+			if (slots[s] != 4) continue;
+			vec3 sand = surface(${NAMES.indexOf('sand') + 1}.0, v_world, v_local, v_top);
+			float shore = 0.0;
+			for (int i = 0; i < 6; i++) {
+				if (((edges >> (12 + i)) & 1) == 0) continue;
+				float distance = 0.8660254 - dot(v_local, NORMALS[i]);
+				float da = fwidth(distance);
+				float width = 0.2 + 0.05 * perlin(v_world * 3.0);
+				shore = max(shore, 1.0 - smoothstep(width - da, width + da, distance));
+			}
+			base = mix(base, sand, shore);
+		}
 		vec3 fill = mix(base, HIGHLIGHT, v_highlight * 0.3);
 		vec3 rgb = v_outline.a > 0.0 ? mix(v_outline.rgb, fill, smoothstep(v_outline.a - aa, v_outline.a + aa, edge)) : fill;
 		float thin = 0.0;
@@ -205,11 +256,11 @@ void main() {
 			int kind = (edges >> (2 * i)) & 3;
 			float distance = 0.8660254 - dot(v_local, NORMALS[i]);
 			float da = fwidth(distance);
-			if (kind == 1 && !(variant == 3 && ((edges >> (12 + i)) & 1) == 1)) thin = max(thin, 1.0 - smoothstep(0.015 - da, 0.015 + da, distance));
+			if (kind == 1 && !(mined && ((edges >> (12 + i)) & 1) == 1)) thin = max(thin, 1.0 - smoothstep(0.015 - da, 0.015 + da, distance));
 			if (kind != 1) open = min(open, distance);
 			if (kind == 2) contour = max(contour, 1.0 - smoothstep(0.08 - da, 0.08 + da, distance));
 		}
-		rgb = mix(rgb, THIN, thin);
+		rgb = mix(rgb, THIN, thin * 0.4);
 		int roads = (int(v_nodes[2]) >> 15) & 127;
 		if (roads != 0) {
 			vec2 nodes[7];
@@ -222,7 +273,7 @@ void main() {
 			int arms = ((edges >> 12) | (edges >> 18)) & 63;
 			int hubs = (int(v_nodes[2]) >> 8) & 127;
 			bool own = (roads & 1) == 1;
-			float road = own ? length(v_local - nodes[0]) - (variant == 1 ? 0.36 : 0.2) : 1e9;
+			float road = own ? length(v_local - nodes[0]) - (highway ? 0.36 : 0.2) : 1e9;
 			float line = 1e9;
 			for (int i = 0; i < 6; i++) {
 				if (!own && ((roads >> (i + 1)) & 1) == 1) {
@@ -276,12 +327,12 @@ flat out float v_kind;
 void main() {
 	vec2 root = i_root.xy - vec2(0.0, i_root.z);
 	if (u_shadow > 0.5) {
-		gl_Position = i_tree.z > 0.5 ? vec4(0.0) : project(root + a_corner * vec2(0.26, 0.1) * i_tree.x);
+		gl_Position = i_tree.z > 0.5 && i_tree.z < ${TREE - 0.5} ? vec4(0.0) : project(root + a_corner * vec2(0.26, 0.1) * i_tree.x);
 		v_offset = a_corner;
 	} else {
 		vec2 uv = vec2(a_corner.x * 0.5 + 0.5, 0.5 - a_corner.y * 0.5);
 		int sprite = int(i_tree.z + 0.5) - 2;
-		vec2 offset = sprite >= 0 ? (uv * SPRITE_SIZES[sprite] - SPRITE_ANCHORS[sprite]) * SPRITE_UNITS[sprite] : i_tree.z > 0.5 ? vec2(a_corner.x * 0.75, mix(0.05, -0.8, a_corner.y * 0.5 + 0.5)) : vec2(a_corner.x * 0.28, mix(0.03, -1.05, a_corner.y * 0.5 + 0.5));
+		vec2 offset = sprite >= 0 ? (uv * SPRITE_SIZES[sprite] - SPRITE_ANCHORS[sprite]) * SPRITE_UNITS[sprite] : vec2(a_corner.x * 0.75, mix(0.05, -0.8, a_corner.y * 0.5 + 0.5));
 		gl_Position = project(root);
 		gl_Position.xy += vec2(offset.x, -offset.y) * i_tree.x * u_view.x / (u_screen / 2.0);
 		if (sprite >= 0 && SPRITE_FLAT[sprite]) gl_Position = project(root + offset * i_tree.x);
@@ -329,27 +380,6 @@ vec4 rock(vec2 p, float seed) {
 	}
 	return vec4(0.0);
 }
-float pine(vec2 q, float seed) {
-	float tiers = 2.0 + floor(fract(seed * 7.31) * 3.0);
-	float girth = 0.11 * (0.8 + 0.4 * fract(seed * 13.17));
-	float rise = 0.06 + 0.025 * fract(seed * 5.73);
-	float taper = 0.35 + 0.2 * fract(seed * 3.37);
-	float stem = 0.04 + 0.03 * fract(seed * 11.9);
-	float tall = rise * 1.35;
-	float trunk = max(abs(q.x) - 0.018, max(q.y, -stem - 0.02 - q.y));
-	float leaves = 1e9;
-	for (int k = 0; k < 4; k++) {
-		if (float(k) >= tiers) break;
-		float bottom = -stem - float(k) * rise;
-		float wide = girth * (1.0 - 0.6 * float(k) / tiers);
-		float edge = mix(wide, wide * taper, clamp((bottom - q.y) / tall, 0.0, 1.0));
-		leaves = min(leaves, max(abs(q.x) - edge, max(q.y - bottom, bottom - tall - q.y)));
-	}
-	float top = -stem - (tiers - 1.0) * rise - tall * 0.75;
-	float edge = girth * (1.0 - 0.6 * (tiers - 1.0) / tiers) * taper * 1.1 * (1.0 - clamp((top - q.y) / 0.1, 0.0, 1.0));
-	leaves = min(leaves, max(abs(q.x) - edge, max(q.y - top, top - 0.1 - q.y)));
-	return leaves < trunk ? -leaves - 1.0 : trunk;
-}
 void main() {
 	if (u_shadow > 0.5) {
 		color = vec4(0.0, 0.0, 0.0, (1.0 - smoothstep(0.3, 1.0, length(v_offset))) * 0.3);
@@ -357,22 +387,12 @@ void main() {
 	}
 	if (v_kind > 1.5) {
 		int sprite = int(v_kind + 0.5) - 2;
-${SPRITES.map((_, k) => `		if (sprite == ${k}) color = texture(u_sprites[${k}], v_uv);`).join('\n')}
+		vec2 uv = v_uv;
+		if (sprite == ${TREE - 2}) uv.x += sin(u_time * 1.1 + v_seed * 6.2831853) * 0.012 * (1.0 - uv.y);
+${SPRITES.map((_, k) => `		if (sprite == ${k}) color = texture(u_sprites[${k}], uv);`).join('\n')}
 		return;
 	}
-	if (v_kind > 0.5) {
-		color = rock(v_offset, v_seed);
-		return;
-	}
-	vec2 q = v_offset / 2.0;
-	float tree = pine(q, v_seed);
-	bool leafy = tree < -0.5;
-	float d = leafy ? -tree - 1.0 : tree;
-	float aa = length(fwidth(q));
-	float tone = clamp(perlin(q * 40.0 + v_seed * 91.0) * 1.5 + v_seed, 0.0, 1.0);
-	vec3 paint = leafy ? mix(vec3(61.0, 101.0, 59.0), vec3(62.0, 95.0, 59.0), tone) / 255.0 : vec3(68.0, 63.0, 55.0) / 255.0;
-	paint *= mix(1.12, 0.78, smoothstep(-0.06, 0.06, q.x)) * mix(0.82, 1.0, smoothstep(0.0, 0.008, -d));
-	color = vec4(paint, 1.0 - smoothstep(-aa, aa, d));
+	color = rock(v_offset, v_seed);
 }`;
 
 function template() {
@@ -451,6 +471,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_highlight', 1, STRIDE, 13, 1);
 	attribute('i_surface', 1, STRIDE, 14, 1);
 	attribute('i_edges', 1, STRIDE, 15, 1);
+	attribute('i_flows', 1, STRIDE, 16, 1);
 
 	const grove = gl.createVertexArray();
 	gl.bindVertexArray(grove);
@@ -513,15 +534,17 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 			planted = data.length / TREE_STRIDE;
 		},
-		draw(data: Float32Array) {
+		draw(data: Float32Array, time = 0) {
 			gl.clear(gl.COLOR_BUFFER_BIT);
 			gl.useProgram(program);
+			gl.uniform1f(gl.getUniformLocation(program, 'u_time'), time);
 			gl.bindVertexArray(vao);
 			gl.bindBuffer(gl.ARRAY_BUFFER, instances);
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, shape.length / 5, data.length / STRIDE);
 			if (!planted) return;
 			gl.useProgram(forest);
+			gl.uniform1f(gl.getUniformLocation(forest, 'u_time'), time);
 			gl.bindVertexArray(grove);
 			const shadow = gl.getUniformLocation(forest, 'u_shadow');
 			for (const pass of [1, 0]) {
@@ -695,13 +718,47 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.stroke();
 			context.restore();
 		}
-		const variant = Math.floor(data[o + 14] / 100);
+		const slots = [1000, 8000, 64000].map((unit) => Math.floor(data[o + 14] / unit) % 8);
+		const mined = slots.includes(3);
 		path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
 		context.fillStyle = color(data, o + 3);
 		context.fill();
-		if (variant === 3) {
-			mine(cx, cy - lift, [...data.subarray(o + 3, o + 6)].map((c) => c * 255), (data[o + 15] >> 12) & 63);
-			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
+		for (const slot of slots) {
+			if (slot === 3) {
+				mine(cx, cy - lift, [...data.subarray(o + 3, o + 6)].map((c) => c * 255), (data[o + 15] >> 12) & 63);
+				path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
+			}
+			if (slot === 5) {
+				context.save();
+				context.clip();
+				context.fillStyle = 'rgb(143 86 59)';
+				context.fill();
+				context.strokeStyle = 'rgb(122 140 52)';
+				context.lineWidth = 0.13 * scale;
+				for (let k = -12; k <= 12; k++) {
+					const [a, b] = [-4, 4].map((t) => project(cx + 0.9397 * t - 0.342 * k * 0.2, cy - lift + 0.342 * t + 0.9397 * k * 0.2));
+					context.beginPath();
+					context.moveTo(...a);
+					context.lineTo(...b);
+					context.stroke();
+				}
+				context.restore();
+			}
+			if (slot !== 4) continue;
+			const sand = BASES.sand.flat;
+			context.save();
+			context.clip();
+			context.strokeStyle = sand;
+			context.lineWidth = 0.4 * scale;
+			for (let i = 0; i < 6; i++) {
+				if (((data[o + 15] >> (12 + i)) & 1) === 0) continue;
+				const [a, b] = [CORNERS[i], CORNERS[(i + 1) % 6]];
+				context.beginPath();
+				context.moveTo(...project(cx + a[0], cy + a[1] - lift));
+				context.lineTo(...project(cx + b[0], cy + b[1] - lift));
+				context.stroke();
+			}
+			context.restore();
 		}
 		if (highlight && data[o + 13] > 0) {
 			context.fillStyle = `rgb(134 158 207 / ${data[o + 13] * 0.3})`;
@@ -718,7 +775,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			if (edge === 6 && (data[o + 11] >> 15) & 127) road(cx, cy - lift, data, o);
 			const kind = (data[o + 15] >> (2 * (edge % 6))) & 3;
 			if (kind !== (edge < 6 ? THIN : CONTOUR)) continue;
-			if (variant === 3 && edge < 6 && (data[o + 15] >> (12 + edge)) & 1) continue;
+			if (mined && edge < 6 && (data[o + 15] >> (12 + edge)) & 1) continue;
 			const border = BORDERS[kind];
 			const [a, b] = [CORNERS[edge % 6], CORNERS[(edge + 1) % 6]];
 			context.beginPath();
@@ -734,14 +791,13 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	const forest = () => {
 		for (let i = 0; i < planted.length; i += TREE_STRIDE) {
 			const [x, y, lift, size] = planted.subarray(i, i + 4);
-			if (planted[i + 5] > 0.5) continue;
+			if (planted[i + 5] > 0.5 && planted[i + 5] < TREE - 0.5) continue;
 			path(Array.from({ length: 16 }, (_, k) => [x + Math.cos((k / 8) * Math.PI) * 0.2 * size, y - lift + Math.sin((k / 8) * Math.PI) * 0.08 * size]));
 			context.fillStyle = 'rgb(0 0 0 / 0.2)';
 			context.fill();
 		}
 		for (let i = 0; i < planted.length; i += TREE_STRIDE) {
 			const [x, y, lift, size, seed, kind] = planted.subarray(i, i + TREE_STRIDE);
-			const leaves = [61, 101 - seed * 6, 59];
 			const [rx, ry] = project(x, y - lift);
 			const span = (project(x + 1, y - lift)[0] - rx) * size;
 			if (kind > 1.5) {
@@ -783,31 +839,6 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 					context.fill();
 				});
 				continue;
-			}
-			const part = (points: number[][], fill: string) => {
-				context.beginPath();
-				for (const [px, py] of points) context.lineTo(rx + px * span, ry + py * span);
-				context.closePath();
-				context.fillStyle = fill;
-				context.fill();
-			};
-			const fract = (k: number) => (seed * k) % 1;
-			const tiers = 2 + Math.floor(fract(7.31) * 3);
-			const girth = 0.22 * (0.8 + 0.4 * fract(13.17));
-			const rise = 0.12 + 0.05 * fract(5.73);
-			const taper = 0.35 + 0.2 * fract(3.37);
-			const stem = 0.08 + 0.06 * fract(11.9);
-			const tall = rise * 1.35;
-			const top = -stem - (tiers - 1) * rise - tall * 0.75;
-			const tip = girth * (1 - (0.6 * (tiers - 1)) / tiers) * taper * 1.1;
-			for (const side of [-1, 1]) {
-				const light = side < 0 ? 1.12 : 0.78;
-				part([[0, 0], [side * 0.036, 0], [side * 0.036, -stem - 0.04], [0, -stem - 0.04]], shade([68, 63, 55], light));
-				for (let k = 0; k < tiers; k++) {
-					const [bottom, wide] = [-stem - k * rise, girth * (1 - (0.6 * k) / tiers)];
-					part([[0, bottom], [side * wide, bottom], [side * wide * taper, bottom - tall], [0, bottom - tall]], shade(leaves, light));
-				}
-				part([[0, top], [side * tip, top], [0, top - 0.2]], shade(leaves, light));
 			}
 		}
 	};

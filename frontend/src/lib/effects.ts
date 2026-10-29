@@ -9,7 +9,7 @@ export interface Effect {
 export const EFFECTS: Record<string, Effect[]> = {};
 
 export function describe(tile: Required<Tile>) {
-	const key = tile.variant || tile.base;
+	const key = tile.variants[0] || tile.base;
 	return { title: key.charAt(0).toUpperCase() + key.slice(1), effects: EFFECTS[key] ?? [] };
 }
 

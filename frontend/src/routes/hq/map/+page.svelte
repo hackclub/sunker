@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
-	import { CONTOUR, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
+	import { CACTUS, CONTOUR, TREE, STRIDE, THIN, TREE_STRIDE, fallback, renderer, rgb, type Renderer } from '#lib/hexes.js';
 	import { HEIGHT, WIDTH, bounds, center, neighbours, place, type PlacedTile } from '#lib/map.js';
 	import { perlin } from '#lib/noise.js';
 
@@ -16,8 +16,9 @@
 	const LEVEL = 0.1;
 	const GRID = [...rgb('#0e0f10'), 0.03];
 	const GROVE = 0.4;
-	const VARIANTS = ['', 'highway', 'street', 'mine'];
+	const VARIANTS = ['', 'highway', 'street', 'mine', 'beach', 'farmland'];
 	const ROADS = ['highway', 'street'];
+	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
 
 	let innerWidth = $state(0);
@@ -50,12 +51,12 @@
 	const groups = $derived.by(() => {
 		const found = new Map<PlacedTile, Set<PlacedTile>>();
 		for (const tile of tiles) {
-			if (tile.tile.variant !== 'mine' || found.has(tile)) continue;
+			if (!tile.tile.variants.includes('mine') || found.has(tile)) continue;
 			const group = new Set([tile]);
 			for (const { row, col } of group) {
 				for (const [r, c] of neighbours(row, col)) {
 					const other = placed.get(`${r},${c}`);
-					if (other?.tile.variant === 'mine') group.add(other);
+					if (other?.tile.variants.includes('mine')) group.add(other);
 				}
 			}
 			for (const member of group) found.set(member, group);
@@ -72,17 +73,19 @@
 	}
 
 	function roads({ tile, row, col }: PlacedTile) {
-		if (tile.variant === 'mine') return neighbours(row, col).reduce((bits, [r, c], i) => (placed.get(`${r},${c}`)?.tile.variant === 'mine' ? bits | (1 << (12 + i)) : bits), 0);
-		if (tile.variant !== 'highway' && tile.variant !== 'street') return 0;
-		return neighbours(row, col).reduce((bits, [r, c], i) => {
-			const other = placed.get(`${r},${c}`)?.tile.variant;
-			if (tile.variant === 'highway' && other === 'highway') return bits | (1 << (12 + i));
-			return other === 'highway' || other === 'street' ? bits | (1 << (18 + i)) : bits;
-		}, 0);
+		const around = neighbours(row, col).map(([r, c]) => placed.get(`${r},${c}`));
+		const arms = (match: (other: PlacedTile) => boolean, shift: number) => around.reduce((bits, other, i) => (other && match(other) ? bits | (1 << (shift + i)) : bits), 0);
+		const road = roadOf(tile);
+		let bits = 0;
+		if (tile.variants.includes('mine')) bits |= arms((other) => other.tile.variants.includes('mine'), 12);
+		if (tile.variants.includes('beach')) bits |= arms((other) => other.tile.base !== tile.base, 12);
+		if (road === 'highway') bits |= arms((other) => roadOf(other.tile) === 'highway', 12);
+		if (road) bits |= arms((other) => roadOf(other.tile) !== '' && !(road === 'highway' && roadOf(other.tile) === 'highway'), 18);
+		return bits;
 	}
 
 	function linked(row: number, col: number) {
-		return neighbours(row, col).flatMap(([r, c], i) => (ROADS.includes(placed.get(`${r},${c}`)?.tile.variant ?? '') ? [i] : []));
+		return neighbours(row, col).flatMap(([r, c], i) => (roadOf(placed.get(`${r},${c}`)?.tile) ? [i] : []));
 	}
 
 	function through(row: number, col: number) {
@@ -101,12 +104,12 @@
 	}
 
 	function hub(row: number, col: number) {
-		return ROADS.includes(placed.get(`${row},${col}`)?.tile.variant ?? '') && linked(row, col).length >= 5;
+		return roadOf(placed.get(`${row},${col}`)?.tile) && linked(row, col).length >= 5;
 	}
 
 	function node(row: number, col: number) {
-		const variant = placed.get(`${row},${col}`)?.tile.variant ?? '';
-		if (!ROADS.includes(variant)) return 0;
+		const variant = roadOf(placed.get(`${row},${col}`)?.tile);
+		if (!variant) return 0;
 		const arms = linked(row, col);
 		const around = neighbours(row, col);
 		const spoke = (i: number, k: number) => [hub(row, col), hub(...(around[i] as [number, number])), hub(...(around[k] as [number, number]))].filter(Boolean).length === 1;
@@ -127,7 +130,7 @@
 		const tiles = [[row, col], ...neighbours(row, col)] as [number, number][];
 		const packed = tiles.map(([r, c]) => node(r, c));
 		const hubs = tiles.reduce((bits, [r, c], k) => (hub(r, c) ? bits | (1 << k) : bits), 0);
-		const roads = tiles.reduce((bits, [r, c], k) => (ROADS.includes(placed.get(`${r},${c}`)?.tile.variant ?? '') ? bits | (1 << k) : bits), 0);
+		const roads = tiles.reduce((bits, [r, c], k) => (roadOf(placed.get(`${r},${c}`)?.tile) ? bits | (1 << k) : bits), 0);
 		return [packed[0] | (packed[1] << 8) | (packed[2] << 16), packed[3] | (packed[4] << 8) | (packed[5] << 16), packed[6] | (hubs << 8) | (roads << 15)];
 	}
 
@@ -140,12 +143,20 @@
 	const trees = $derived.by(() => {
 		const found: number[][] = [];
 		for (const { tile, row, col, x, y } of tiles) {
-			if (tile.variant === 'sunker') {
+			if (tile.variants.includes('sunker')) {
 				found.push([x, y, tile.height * LIFT, 0.6 + hash(col, row, 5) * 0.2, hash(col, row, 6), 1]);
 				found.push([x + (hash(col, row, 7) - 0.5) * 0.6, y + 0.2 + hash(col, row, 8) * 0.2, tile.height * LIFT, 0.25 + hash(col, row, 9) * 0.1, hash(col, row, 10), 1]);
 			}
-			if (tile.variant === 'mountain') found.push([x, y, tile.height * LIFT, 1.1 + hash(col, row, 11) * 0.15, hash(col, row, 12), 2]);
-			const kinds = tile.variant === 'buildings' ? [3, 4] : tile.variant === 'houses' ? [5, 6] : null;
+			if (tile.variants.includes('mountain')) found.push([x, y + 0.4, tile.height * LIFT, 0.9, hash(col, row, 12), 2]);
+			if (tile.variants.includes('cactus')) {
+				const count = 2 + Math.floor(hash(col, row, 30) * 2);
+				for (let k = 0; k < count; k++) {
+					const tx = x + (hash(col, row, 31 + k) - 0.5) * 1.1;
+					const ty = y + (hash(col, row, 34 + k) - 0.3) * 0.7;
+					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 37 + k) * 0.5, hash(col, row, 40 + k), CACTUS]);
+				}
+			}
+			const kinds = tile.variants.includes('buildings') ? [3, 4] : tile.variants.includes('houses') ? [5, 6] : null;
 			if (kinds) {
 				const count = 2 + Math.floor(hash(col, row, 13) * 2);
 				for (let k = 0; k < count; k++) {
@@ -153,7 +164,7 @@
 					found.push([x + along * 1.2, y + 0.25 + hash(col, row, 17 + k) * 0.2, tile.height * LIFT, 0.85 + hash(col, row, 20 + k) * 0.3, 0, kinds[hash(col, row, 23 + k) < 0.5 ? 0 : 1]]);
 				}
 			}
-			if (tile.variant !== 'forest') continue;
+			if (!tile.variants.includes('forest')) continue;
 			for (let row = Math.floor((y - 1) / GROVE); row <= Math.floor((y + 1) / GROVE); row++) {
 				for (let col = Math.floor((x - WIDTH / 2) / GROVE); col <= Math.floor((x + WIDTH / 2) / GROVE); col++) {
 					if (hash(col, row, 0) > 0.85) continue;
@@ -161,7 +172,7 @@
 					const ty = (row + 0.15 + hash(col, row, 2) * 0.7) * GROVE;
 					const [dx, dy] = [Math.abs(tx - x), Math.abs(ty - y)];
 					if (dx > WIDTH / 2 || dx * 0.5 + dy * WIDTH / 2 > WIDTH / 2) continue;
-					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), 0]);
+					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), TREE]);
 				}
 			}
 		}
@@ -240,9 +251,10 @@
 				const { tile } = hex.placed;
 				const base = tile.base in BASES ? tile.base : 'plain';
 				data.set([tile.height * LIFT, ...rgb(BASES[base].flat), ...rgb(tile.side)], o + 2);
-				data[o + 14] = NAMES.indexOf(base) + 1 + 100 * Math.max(0, VARIANTS.indexOf(tile.variant));
+				data[o + 14] = NAMES.indexOf(base) + 1 + 100 * (tile.flow + 1) + tile.variants.map((variant) => VARIANTS.indexOf(variant)).filter((index) => index > 0).slice(0, 3).reduce((sum, index, k) => sum + index * 1000 * 8 ** k, 0);
 				data[o + 15] = edges(hex.placed) | roads(hex.placed);
-				if (ROADS.includes(tile.variant) || linked(hex.placed.row, hex.placed.col).length) data.set(nodes(hex.placed), o + 9);
+				data[o + 16] = neighbours(hex.placed.row, hex.placed.col).reduce((bits, [r, c], k) => bits | (((placed.get(`${r},${c}`)?.tile.flow ?? -1) + 1) << (3 * k)), 0);
+				if (roadOf(tile) || linked(hex.placed.row, hex.placed.col).length) data.set(nodes(hex.placed), o + 9);
 			} else {
 				data.set(GRID, o + 9);
 			}
@@ -274,7 +286,7 @@
 				data[o + 7] = b;
 				data[o + 8] = b + 1 / 255;
 			});
-			gl.draw(data);
+			gl.draw(data, time / 1000);
 		};
 		frame = requestAnimationFrame(draw);
 		return () => cancelAnimationFrame(frame);
