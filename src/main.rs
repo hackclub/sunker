@@ -7,8 +7,8 @@ use hc_helper::auth::data::forget_auth_token;
 use hc_helper::auth::login::{self, CallbackArgs, Scopes, TOKEN_COOKIE};
 use std::future::Ready;
 
-const FRONTEND_DIR: &str = "../frontend/build";
-const INDEX_FILE: &str = "../frontend/build/index.html";
+const FRONTEND_DIR: &str = "frontend/build";
+const INDEX_FILE: &str = "frontend/build/index.html";
 const MAP_FILE: &str = "map.json";
 const CALLBACK: &str = "/callback";
 

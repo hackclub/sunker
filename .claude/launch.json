@@ -4,7 +4,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd backend && cargo run"],
+      "runtimeArgs": ["-c", "cargo run"],
       "port": 4400
     },
     {

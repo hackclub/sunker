@@ -16,6 +16,7 @@ export default defineConfig({
 			adapter: adapter({ fallback: 'index.html' })
 		})
 	],
+	envDir: '..',
 	server: {
 		proxy: {
 			'/api': 'http://localhost:4400',
