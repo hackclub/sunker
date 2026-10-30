@@ -10,6 +10,8 @@
 	const MAX_COMETS = 3;
 	const MAX_SPARKS = 40;
 	const PULSE_MS = 8000;
+	const MARGIN = 2;
+	const SETTLE_MS = 150;
 	const DEFAULT_CHARS =
 		'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789αβγδελμπσφψωΔΣΩ{}[]()<>/\\|=+-*&^%$#@!?:;~';
 	const CHARSETS = [...RING_CHARSETS, DEFAULT_CHARS];
@@ -33,6 +35,8 @@
 	let sparks = 0;
 	let lit: Region | null = null;
 	let mouse: [number, number] | null = null;
+	let urls: string[] = [];
+	let generation = 0;
 
 	const randomChar = (set: string) => set[Math.floor(Math.random() * set.length)];
 
@@ -86,8 +90,16 @@
 		wrap.style.setProperty('--dim', String(dim));
 		el.style.letterSpacing = `${charWidth - natural}px`;
 		syncPulse(el);
-		el.textContent = Array.from({ length: rows }, () =>
-			Array.from({ length: cols }, () => randomChar(set)).join('')
+		const shown = (col: number, row: number) => {
+			if (!ring) return true;
+			const [x0, y0] = [left + col * charWidth - ring.cx, top + row * LINE - ring.cy];
+			const [x1, y1] = [x0 + charWidth, y0 + LINE];
+			const far = Math.hypot(Math.max(Math.abs(x0), Math.abs(x1)), Math.max(Math.abs(y0), Math.abs(y1)));
+			const near = Math.hypot(Math.max(0, x0, -x1), Math.max(0, y0, -y1));
+			return far > ring.inner - MARGIN && near < ring.outer + MARGIN;
+		};
+		el.textContent = Array.from({ length: rows }, (_, row) =>
+			Array.from({ length: cols }, (_, col) => (shown(col, row) ? randomChar(set) : ' ')).join('')
 		).join('\n');
 		if (ring) {
 			const { cx, cy, inner, outer } = ring;
@@ -99,7 +111,7 @@
 			const size = `${cols * charWidth}px ${rows * LINE}px`;
 			for (let i = 0; i < 3; i++) {
 				const noise = document.createElement('div');
-				noise.style.backgroundImage = `url(${noiseImage(cols, rows, 14 * (1 - dim), 15 * (1 - dim), 16 * (1 - dim))})`;
+				paintNoise(noise, cols, rows, 14 * (1 - dim), 15 * (1 - dim), 16 * (1 - dim));
 				noise.style.backgroundSize = size;
 				texture.append(noise);
 			}
@@ -109,21 +121,37 @@
 		regions[k] = { el, wrap, set, left, top, charWidth, cols, rows };
 	}
 
-	function noiseImage(cols: number, rows: number, r: number, g: number, b: number) {
+	function paintNoise(target: HTMLElement, cols: number, rows: number, r: number, g: number, b: number) {
 		const canvas = document.createElement('canvas');
 		canvas.width = cols;
 		canvas.height = rows;
 		const ctx = canvas.getContext('2d')!;
 		const image = ctx.createImageData(cols, rows);
-		for (let i = 0; i < cols * rows; i++) {
-			image.data.set([r, g, b, Math.random() * 120], i * 4);
+		for (let i = 0; i < cols * rows * 4; i += 4) {
+			image.data[i] = r;
+			image.data[i + 1] = g;
+			image.data[i + 2] = b;
+			image.data[i + 3] = Math.random() * 120;
 		}
 		ctx.putImageData(image, 0, 0);
-		return canvas.toDataURL();
+		const current = generation;
+		canvas.toBlob((blob) => {
+			if (!blob || current !== generation) return;
+			const url = URL.createObjectURL(blob);
+			urls.push(url);
+			target.style.backgroundImage = `url(${url})`;
+		});
+	}
+
+	function release() {
+		generation++;
+		urls.forEach((url) => URL.revokeObjectURL(url));
+		urls = [];
 	}
 
 	function build() {
 		container.replaceChildren();
+		release();
 		regions = [];
 		comets = [];
 		sparks = 0;
@@ -238,14 +266,21 @@
 			mouse = null;
 			updateHover();
 		};
-		window.addEventListener('resize', build);
+		let pending: ReturnType<typeof setTimeout> | undefined;
+		const onResize = () => {
+			clearTimeout(pending);
+			pending = setTimeout(build, SETTLE_MS);
+		};
+		window.addEventListener('resize', onResize);
 		window.addEventListener('pointermove', onMove);
 		document.documentElement.addEventListener('pointerleave', onLeave);
 		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 		const timer = reducedMotion ? undefined : setInterval(step, 1000 / FPS);
 		return () => {
 			clearInterval(timer);
-			window.removeEventListener('resize', build);
+			clearTimeout(pending);
+			release();
+			window.removeEventListener('resize', onResize);
 			window.removeEventListener('pointermove', onMove);
 			document.documentElement.removeEventListener('pointerleave', onLeave);
 		};

@@ -1,6 +1,7 @@
 use actix_files::{Files, NamedFile};
-use actix_web::dev::{ServiceRequest, ServiceResponse, fn_service};
-use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
+use actix_web::dev::{Service, ServiceRequest, ServiceResponse, fn_service};
+use actix_web::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderValue};
+use actix_web::{App, HttpResponse, HttpServer, Responder, get, middleware, web};
 
 const FRONTEND_DIR: &str = "../frontend/build";
 const INDEX_FILE: &str = "../frontend/build/index.html";
@@ -44,11 +45,39 @@ async fn main() -> std::io::Result<()> {
     std::fs::metadata(INDEX_FILE).expect("frontend not built");
 
     HttpServer::new(|| {
-        App::new().service(health).service(map).service(
-            Files::new("/", FRONTEND_DIR)
-                .index_file("index.html")
-                .default_handler(fn_service(fallback)),
-        )
+        App::new()
+            .wrap_fn(|req, srv| {
+                let immutable = req.path().starts_with("/_app/immutable/");
+                let response = srv.call(req);
+                async move {
+                    let mut response = response.await?;
+                    let html = response
+                        .headers()
+                        .get(CONTENT_TYPE)
+                        .is_some_and(|kind| kind.as_bytes().starts_with(b"text/html"));
+                    let policy = if immutable && response.status().is_success() {
+                        Some("public, max-age=31536000, immutable")
+                    } else if html {
+                        Some("no-cache")
+                    } else {
+                        None
+                    };
+                    if let Some(policy) = policy {
+                        response
+                            .headers_mut()
+                            .insert(CACHE_CONTROL, HeaderValue::from_static(policy));
+                    }
+                    Ok(response)
+                }
+            })
+            .wrap(middleware::Compress::default())
+            .service(health)
+            .service(map)
+            .service(
+                Files::new("/", FRONTEND_DIR)
+                    .index_file("index.html")
+                    .default_handler(fn_service(fallback)),
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()

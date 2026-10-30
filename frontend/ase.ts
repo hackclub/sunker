@@ -1,10 +1,14 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import optimise, { init } from '@jsquash/oxipng/optimise.js';
 import Aseprite from 'ase-parser';
 import { PNG } from 'pngjs';
 import type { Plugin } from 'vite';
 
-function render(file: string) {
+const ready = init(readFileSync(createRequire(import.meta.url).resolve('@jsquash/oxipng/codec/pkg/squoosh_oxipng_bg.wasm')));
+
+async function render(file: string) {
 	const buffer = readFileSync(file);
 	for (let o = 128, frame = 0; frame < buffer.readUInt16LE(6); frame++, o += buffer.readUInt32LE(o)) {
 		if (!buffer.readUInt32LE(o + 12)) buffer.writeUInt32LE(buffer.readUInt16LE(o + 6), o + 12);
@@ -65,7 +69,8 @@ function render(file: string) {
 			(!old.data[i + 3] && !png.data[i + 3]) || old.data.readUInt32BE(i) === png.data.readUInt32BE(i);
 		if (old.width === png.width && old.height === png.height && png.data.every((_, i) => i % 4 || same(i))) return;
 	}
-	writeFileSync(out, PNG.sync.write(png));
+	await ready;
+	writeFileSync(out, Buffer.from(await optimise(new Uint8Array(PNG.sync.write(png)).buffer, { level: 6, optimiseAlpha: false })));
 }
 
 function files(dir: string): string[] {
@@ -79,8 +84,8 @@ function files(dir: string): string[] {
 export default function ase(dir = 'src'): Plugin {
 	return {
 		name: 'ase',
-		buildStart() {
-			files(dir).forEach(render);
+		async buildStart() {
+			await Promise.all(files(dir).map(render));
 		},
 		configureServer(server) {
 			const update = (file: string) => file.endsWith('.ase') && render(file);

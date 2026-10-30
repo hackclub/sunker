@@ -18,7 +18,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { place } from '#lib/map.js';
-	import { FLIGHT, footprint, halo, inside, island, reveal, table as tabled } from '#lib/view.js';
+	import { FLIGHT, footprint, halo, inside, island, reveal, squash, table as tabled } from '#lib/view.js';
 	import Projects from '#lib/hq/Projects.svelte';
 	import Propaganda from '#lib/hq/Propaganda.svelte';
 	import Help from '#lib/hq/Help.svelte';
@@ -127,6 +127,12 @@
 
 	const wanted = $derived((page.shallow?.url ?? page.url).searchParams.has('map'));
 	let settled = page.url.searchParams.has('map');
+	let docked = $state(!settled);
+	const detail = $derived.by((): [number, number] => {
+		if (!docked) return [1, 1];
+		const [x, y] = squash(tiles, innerWidth, innerHeight);
+		return [Math.min(1, 2 * x), Math.min(1, 2 * y)];
+	});
 	let flight: HTMLElement;
 	let animations: Animation[] = [];
 	let keyframes: ReturnType<typeof reveal> | undefined;
@@ -152,6 +158,7 @@
 	}
 
 	async function fly(opening: boolean) {
+		if (opening) docked = false;
 		if (animations.length) animations.forEach((animation) => (animation.playbackRate = -animation.playbackRate));
 		else {
 			const { grow, spread } = keyframes ?? reveal(tiles, innerWidth, innerHeight);
@@ -163,6 +170,7 @@
 		if (current !== animations || animations.some((animation) => animation.playState === 'running')) return;
 		animations.forEach((animation) => animation.cancel());
 		animations = [];
+		docked = !settled;
 	}
 
 	$effect(() => {
@@ -349,7 +357,7 @@
 	{/each}
 
 	<div class="flight" class:open={wanted} style:transform={wanted ? null : pose} style:--clip={wanted ? null : clip} bind:this={flight}>
-		<WorldMap map={data.map} table={!wanted} />
+		<WorldMap map={data.map} table={!wanted} {detail} />
 		{#if wanted}
 			<button class="back" aria-label="Back to HQ" onclick={close}>
 				<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>

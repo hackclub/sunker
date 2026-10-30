@@ -12,7 +12,7 @@ RUN bun install --frozen-lockfile
 COPY frontend .
 RUN bun run build
 
-FROM debian:bookworm-slim
+FROM gcr.io/distroless/cc-debian12
 WORKDIR /app/backend
 COPY --from=backend /app/backend/target/release/backend /usr/local/bin/backend
 COPY --from=frontend /app/frontend/build /app/frontend/build

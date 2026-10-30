@@ -4,10 +4,9 @@
 	import { MAP, rgb } from '#lib/colors.js';
 	import { CONTOUR, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
 	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile } from '#lib/map.js';
-	import { perlin } from '#lib/noise.js';
 	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid, unprojector } from '#lib/view.js';
 
-	let { map, table = false }: { map: HexMap; table?: boolean } = $props();
+	let { map, table = false, detail = [1, 1] }: { map: HexMap; table?: boolean; detail?: [number, number] } = $props();
 
 	const LEVEL = 0.1;
 	const GRID = [...rgb(MAP.background), 0.03];
@@ -299,13 +298,6 @@
 		pointer = { x: event.clientX, y: event.clientY };
 	}
 
-	function noise(x: number, y: number, t: number) {
-		const n =
-			0.65 * perlin(x * 0.07 + t * 0.012, y * 0.07 + t * 0.006) +
-			0.35 * perlin(x * 0.16 - t * 0.008 + 31, y * 0.16 + t * 0.01 + 17);
-		return Math.min(1, Math.max(0, n * 1.4 + 0.5));
-	}
-
 	$effect(() => {
 		if (table) hovered = null;
 	});
@@ -333,22 +325,10 @@
 		};
 	});
 
-	$effect(() => {
-		restored;
-		const { width, height, scale, x, y } = plane;
-		const hexes = field;
+	const instances = $derived.by(() => {
 		const top = ceiling;
-		const gl = (painter ??= renderer(canvas) ?? fallback(canvas));
-		gl.resize(
-			{ width: innerWidth, height: innerHeight, ratio },
-			{ width, height, scale, x, y },
-			{ perspective: PERSPECTIVE, tilt: TILT }
-		);
-		gl.plant(trees);
-		gl.pave(ramps);
-
-		const data = new Float32Array(hexes.length * STRIDE);
-		hexes.forEach((hex, i) => {
+		const data = new Float32Array(field.length * STRIDE);
+		field.forEach((hex, i) => {
 			const o = i * STRIDE;
 			data.set([hex.x, hex.y], o);
 			if (hex.placed) {
@@ -362,37 +342,40 @@
 				data[o + 16] = slopes(hex.placed).reduce((bits, [i]) => bits | (1 << i), 0);
 				if (roadOf(tile) || linked(hex.placed.row, hex.placed.col).length) data.set(nodes(hex.placed), o + 9);
 			} else {
+				data[o + 2] = top * LIFT;
 				data.set(GRID, o + 9);
 			}
 		});
+		return data;
+	});
+
+	$effect(() => {
+		restored;
+		const { width, height, scale, x, y } = plane;
+		const hexes = field;
+		const data = instances;
+		const gl = (painter ??= renderer(canvas) ?? fallback(canvas));
+		gl.resize(
+			{ width: innerWidth, height: innerHeight, ratio: [ratio * detail[0], ratio * detail[1]] },
+			{ width, height, scale, x, y },
+			{ perspective: PERSPECTIVE, tilt: TILT }
+		);
+		gl.plant(trees);
+		gl.pave(ramps);
 
 		let frame = 0;
 		let drawn: PlacedTile | null | undefined;
 		const draw = (time: number) => {
 			frame = requestAnimationFrame(draw);
 			if (!gl.animated && drawn === hovered) return;
-			const still = drawn !== undefined && !gl.animated;
-			drawn = hovered;
-			const t = gl.animated ? time / 80 : 0;
-			hexes.forEach((hex, i) => {
-				const o = i * STRIDE;
-				if (hex.placed) {
-					data[o + 13] = hovered === hex.placed || (hovered && groups.get(hovered)?.has(hex.placed)) ? 1 : 0;
-					return;
-				}
-				if (still) return;
-				const n = noise(hex.x, hex.y, t);
-				const v = (20 + n * 22) / 255;
-				const b = v * 0.7;
-				data[o + 2] = n * top * LIFT;
-				data[o + 3] = v;
-				data[o + 4] = v + 1 / 255;
-				data[o + 5] = v + 2 / 255;
-				data[o + 6] = b;
-				data[o + 7] = b;
-				data[o + 8] = b + 1 / 255;
-			});
-			gl.draw(data, time / 1000);
+			if (drawn !== hovered) {
+				drawn = hovered;
+				hexes.forEach((hex, i) => {
+					if (hex.placed) data[i * STRIDE + 13] = hovered === hex.placed || (hovered && groups.get(hovered)?.has(hex.placed)) ? 1 : 0;
+				});
+				gl.fill(data);
+			}
+			gl.draw(time / 1000);
 		};
 		frame = requestAnimationFrame(draw);
 		return () => cancelAnimationFrame(frame);

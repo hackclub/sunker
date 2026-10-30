@@ -28,7 +28,7 @@
 	<title>Mines - Hack Club Sunker</title>
 	<link
 		rel="stylesheet"
-		href="https://fonts.googleapis.com/css2?family=Share+Tech&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap"
+		href="https://fonts.googleapis.com/css2?family=Share+Tech&family=JetBrains+Mono&display=swap"
 	/>
 </svelte:head>
 

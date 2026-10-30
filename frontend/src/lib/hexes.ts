@@ -1,6 +1,7 @@
-import { BASES, LIBRARY, NAMES } from '#lib/bases.js';
+import { BASES, LIBRARY, NAMES, NOISE } from '#lib/bases.js';
 import { MAP, css, rgb, vec3 } from '#lib/colors.js';
 import { CORNERS, FRONT, WIDTH } from '#lib/map.js';
+import { perlin } from '#lib/noise.js';
 import mountain from '#lib/assets/images/mountain.png';
 import building1 from '#lib/assets/images/building1.png';
 import building2 from '#lib/assets/images/building2.png';
@@ -43,7 +44,7 @@ const bool SPRITE_FLAT[${SPRITES.length}] = bool[${SPRITES.length}](${SPRITES.ma
 
 const BORDERS: Record<number, { width: number; focus: number; alpha: number }> = { [THIN]: { width: 0.015, focus: 0.035, alpha: 0.4 }, [CONTOUR]: { width: 0.08, focus: 0.1, alpha: 1 } };
 
-type Screen = { width: number; height: number; ratio: number };
+type Screen = { width: number; height: number; ratio: [number, number] };
 type Plane = { width: number; height: number; scale: number; x: number; y: number };
 type Camera = { perspective: number; tilt: number };
 
@@ -52,7 +53,8 @@ export interface Renderer {
 	resize(screen: Screen, plane: Plane, camera: Camera): void;
 	plant(trees: Float32Array): void;
 	pave(ramps: Float32Array): void;
-	draw(data: Float32Array, time?: number): void;
+	fill(data: Float32Array): void;
+	draw(time?: number): void;
 	destroy(): void;
 }
 
@@ -88,7 +90,9 @@ in float i_surface;
 in float i_edges;
 in float i_slopes;
 in float i_arms;
+uniform vec2 u_seed;
 ${PROJECT}
+${NOISE}
 out vec2 v_local;
 out float v_kind;
 out float v_along;
@@ -104,14 +108,27 @@ flat out float v_slopes;
 flat out float v_arms;
 flat out vec3 v_nodes;
 void main() {
+	float lift = i_lift;
+	vec3 top = i_top;
+	vec3 side = i_side;
+	if (i_surface < 0.5) {
+		float t = u_time * 12.5;
+		vec2 p = i_center + u_seed;
+		float n = 0.65 * perlin(p * 0.07 + t * vec2(0.012, 0.006)) + 0.35 * perlin(p * 0.16 + vec2(31.0, 17.0) + t * vec2(-0.008, 0.01));
+		n = clamp(n * 1.4 + 0.5, 0.0, 1.0);
+		float v = (20.0 + n * 22.0) / 255.0;
+		lift *= n;
+		top = v + vec3(0.0, 1.0, 2.0) / 255.0;
+		side = v * 0.7 + vec3(0.0, 0.0, 1.0) / 255.0;
+	}
 	vec2 position = a_kind > 0.5 ? a_position * 1.005 : a_position;
-	gl_Position = layer(project(i_center + position - vec2(0.0, a_raise * i_lift)), i_center.y);
+	gl_Position = layer(project(i_center + position - vec2(0.0, a_raise * lift)), i_center.y);
 	v_local = position;
 	v_kind = a_kind;
 	v_along = a_along;
-	v_height = a_raise * i_lift;
-	v_top = i_top;
-	v_side = i_side;
+	v_height = a_raise * lift;
+	v_top = top;
+	v_side = side;
 	v_outline = i_outline;
 	v_highlight = i_highlight;
 	v_world = i_center + position;
@@ -615,7 +632,10 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_bend', 2, RAMP_STRIDE, 7, 1, asphalt);
 	attribute('i_tile', 1, RAMP_STRIDE, 9, 1, asphalt);
 	let paved = 0;
+	let count = 0;
 
+	gl.useProgram(program);
+	gl.uniform2f(gl.getUniformLocation(program, 'u_seed'), Math.random() * 100, Math.random() * 100);
 	gl.useProgram(forest);
 	gl.uniform1iv(gl.getUniformLocation(forest, 'u_sprites'), SPRITES.map((_, k) => k));
 	SPRITES.forEach(({ src }, k) => {
@@ -652,8 +672,8 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	return {
 		animated: true,
 		resize(screen, plane, camera) {
-			canvas.width = Math.round(screen.width * screen.ratio);
-			canvas.height = Math.round(screen.height * screen.ratio);
+			canvas.width = Math.round(screen.width * screen.ratio[0]);
+			canvas.height = Math.round(screen.height * screen.ratio[1]);
 			gl.viewport(0, 0, canvas.width, canvas.height);
 			const radians = (camera.tilt * Math.PI) / 180;
 			uniforms((uniform) => {
@@ -674,15 +694,18 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 			paved = data.length / RAMP_STRIDE;
 		},
-		draw(data: Float32Array, time = 0) {
+		fill(data) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, instances);
+			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+			count = data.length / STRIDE;
+		},
+		draw(time = 0) {
 			gl.depthMask(true);
 			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 			gl.useProgram(program);
 			gl.uniform1f(gl.getUniformLocation(program, 'u_time'), time);
 			gl.bindVertexArray(vao);
-			gl.bindBuffer(gl.ARRAY_BUFFER, instances);
-			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-			gl.drawArraysInstanced(gl.TRIANGLES, 0, shape.length / 5, data.length / STRIDE);
+			gl.drawArraysInstanced(gl.TRIANGLES, 0, shape.length / 5, count);
 			gl.depthMask(false);
 			if (paved) {
 				gl.useProgram(asphalt);
@@ -709,6 +732,11 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	};
 }
 
+function noise(x: number, y: number) {
+	const n = 0.65 * perlin(x * 0.07, y * 0.07) + 0.35 * perlin(x * 0.16 + 31, y * 0.16 + 17);
+	return Math.min(1, Math.max(0, n * 1.4 + 0.5));
+}
+
 export function fallback(canvas: HTMLCanvasElement): Renderer {
 	let context = canvas.getContext('2d', { alpha: false });
 	if (!context) {
@@ -724,12 +752,13 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	let reach = 0;
 	let planted: Float32Array = new Float32Array();
 	let paved: Float32Array = new Float32Array();
+	let source: Float32Array | undefined;
 	let last: Float32Array | undefined;
 	const sprites = SPRITES.map(({ src }) => {
 		const sprite = new Image();
 		sprite.onload = () => {
 			stale = true;
-			if (last) renderer.draw(last);
+			renderer.draw();
 		};
 		sprite.src = src;
 		return sprite;
@@ -1054,9 +1083,9 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	const renderer: Renderer = {
 		animated: false,
 		resize(screen, plane, camera) {
-			canvas.width = cache.width = Math.round(screen.width * screen.ratio);
-			canvas.height = cache.height = Math.round(screen.height * screen.ratio);
-			context.setTransform(screen.ratio, 0, 0, screen.ratio, 0, 0);
+			canvas.width = cache.width = Math.round(screen.width * screen.ratio[0]);
+			canvas.height = cache.height = Math.round(screen.height * screen.ratio[1]);
+			context.setTransform(screen.ratio[0], 0, 0, screen.ratio[1], 0, 0);
 			const radians = (camera.tilt * Math.PI) / 180;
 			const [cos, sin] = [Math.cos(radians), Math.sin(radians)];
 			scale = plane.scale;
@@ -1076,8 +1105,24 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			paved = data;
 			stale = true;
 		},
-		draw(data) {
-			last = data;
+		fill(data) {
+			if (data !== source) {
+				source = data;
+				last = data.slice();
+				for (let o = 0; o < last.length; o += STRIDE) {
+					if (last[o + 14] >= 0.5) continue;
+					const n = noise(last[o], last[o + 1]);
+					const v = (20 + n * 22) / 255;
+					const b = v * 0.7;
+					last.set([n * last[o + 2], v, v + 1 / 255, v + 2 / 255, b, b, b + 1 / 255], o + 2);
+				}
+				stale = true;
+			}
+			for (let o = 13; o < data.length; o += STRIDE) last![o] = data[o];
+		},
+		draw() {
+			if (!last) return;
+			const data = last;
 			const count = data.length / STRIDE;
 			const lit = [];
 			for (let i = 0; i < count; i++) if (data[i * STRIDE + 13] > 0) lit.push(i);

@@ -66,6 +66,11 @@ export function table(tiles: PlacedTile[], width: number, height: number) {
 	return `translateY(${-rise}px) scale(${scale}, ${scale * FLATTEN})`;
 }
 
+export function squash(tiles: PlacedTile[], width: number, height: number): [number, number] {
+	const { scale } = placement(tiles, width, height);
+	return [scale, scale * FLATTEN];
+}
+
 export function halo(tiles: PlacedTile[], width: number, height: number) {
 	const { scale, rise } = placement(tiles, width, height);
 	const point = ([x, y]: Point) => `${width / 2 + (x - width / 2) * scale} ${height / 2 + (y - height / 2) * scale * FLATTEN - rise}`;
