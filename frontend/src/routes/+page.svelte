@@ -4,7 +4,7 @@
 
 <main>
 	<h1>Hack Club Sunker</h1>
-	<a href="/hq">Enter HQ</a>
+	<a href="/login" rel="external">Enter HQ</a>
 </main>
 
 <style>

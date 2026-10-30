@@ -18,7 +18,10 @@ export default defineConfig({
 	],
 	server: {
 		proxy: {
-			'/api': 'http://localhost:4400'
+			'/api': 'http://localhost:4400',
+			'/login': 'http://localhost:4400',
+			'/callback': 'http://localhost:4400',
+			'/logout': 'http://localhost:4400'
 		}
 	}
 });

@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 actix-files = "0.7.2"
 actix-web = "4.17.0"
+dotenvy = "0.15"
+hc_helper = { git = "https://github.com/breynard0/hc_helper", version = "0.1.0" }
 serde_json = "1.0.154"
 sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring-webpki", "macros", "migrate", "json", "chrono"] }
 
