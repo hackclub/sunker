@@ -1,3 +1,4 @@
+use crate::analytics;
 use actix_web::cookie::Cookie;
 use actix_web::{HttpRequest, HttpResponse, get, web};
 use chrono::NaiveDate;
@@ -144,11 +145,14 @@ pub async fn callback(
 }
 
 #[get("/api/session")]
-pub async fn session(req: HttpRequest) -> HttpResponse {
-    match login::get_auth_token_with_handling(&req) {
-        Some(_) => HttpResponse::NoContent().finish(),
-        None => HttpResponse::Unauthorized().finish(),
+pub async fn session(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
+    if login::get_auth_token_with_handling(&req).is_none() {
+        return HttpResponse::Unauthorized().finish();
     }
+    if let Err(e) = analytics::record_login(&req, &pool).await {
+        eprintln!("recording login failed: {e}");
+    }
+    HttpResponse::NoContent().finish()
 }
 
 #[get("/logout")]

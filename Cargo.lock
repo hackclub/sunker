@@ -290,6 +290,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dotenvy",
+ "futures-util",
  "hc_helper",
  "serde_json",
  "sqlx",

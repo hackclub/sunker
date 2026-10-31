@@ -211,9 +211,11 @@ CREATE TABLE message (
 CREATE TABLE analytics (
     id BIGSERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES "user" (id),
+    visitor_id TEXT,
     kind TEXT NOT NULL CHECK (kind IN ('visit', 'login', 'active')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK ((kind = 'visit') = (user_id IS NULL))
+    CHECK ((kind = 'visit') = (user_id IS NULL)),
+    CHECK ((kind = 'visit') = (visitor_id IS NOT NULL))
 );
 
 CREATE TABLE permission (
@@ -309,6 +311,7 @@ CREATE INDEX order_unfulfilled ON "order" (created_at) WHERE fulfilled_at IS NUL
 CREATE INDEX message_feed ON message (chat_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX analytics_user ON analytics (user_id, kind, created_at);
 CREATE INDEX analytics_created_at ON analytics (created_at);
+CREATE INDEX analytics_visitor ON analytics (visitor_id, created_at) WHERE kind = 'visit';
 CREATE INDEX slack_dm_queue ON slack_dm (id) WHERE sent_at IS NULL AND skipped_at IS NULL AND failed_at IS NULL;
 CREATE INDEX survey_response_survey_id ON survey_response (survey_id);
 

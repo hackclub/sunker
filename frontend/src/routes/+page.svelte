@@ -1,3 +1,20 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+
+	onMount(() => {
+		let visitor: string = crypto.randomUUID();
+		try {
+			visitor = localStorage.getItem('visitor') ?? visitor;
+			localStorage.setItem('visitor', visitor);
+		} catch {}
+		fetch('/api/visit', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ visitor })
+		}).catch(() => {});
+	});
+</script>
+
 <svelte:head>
 	<title>Hack Club Sunker</title>
 </svelte:head>

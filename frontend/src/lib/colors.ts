@@ -6,7 +6,7 @@ export const PALETTE = {
 	'tip-border': '#393b40',
 	text: '#dfe1e5',
 	'text-muted': '#868a91',
-	accent: '#869ecf',
+	accent: '#548cde',
 	dot: '#3574f0',
 	negative: '#e06c6c',
 	positive: '#6cc47a',
