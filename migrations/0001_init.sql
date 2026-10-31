@@ -202,10 +202,20 @@ CREATE TABLE message (
     id BIGSERIAL PRIMARY KEY,
     author_id INTEGER NOT NULL REFERENCES "user" (id),
     chat_id INTEGER NOT NULL REFERENCES chat (id),
+    reply_to BIGINT REFERENCES message (id),
     contents TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
     deleted_by INTEGER REFERENCES "user" (id)
+);
+
+CREATE TABLE message_flag (
+    message_id BIGINT NOT NULL REFERENCES message (id),
+    user_id INTEGER NOT NULL REFERENCES "user" (id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    dismissed_at TIMESTAMPTZ,
+    dismissed_by INTEGER REFERENCES "user" (id),
+    PRIMARY KEY (message_id, user_id)
 );
 
 CREATE TABLE analytics (
@@ -309,6 +319,7 @@ CREATE INDEX resource_ledger_ship_id ON resource_ledger (ship_id);
 CREATE INDEX order_user_id ON "order" (user_id);
 CREATE INDEX order_unfulfilled ON "order" (created_at) WHERE fulfilled_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX message_feed ON message (chat_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX message_reply_to ON message (reply_to);
 CREATE INDEX analytics_user ON analytics (user_id, kind, created_at);
 CREATE INDEX analytics_created_at ON analytics (created_at);
 CREATE INDEX analytics_visitor ON analytics (visitor_id, created_at) WHERE kind = 'visit';

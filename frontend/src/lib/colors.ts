@@ -10,6 +10,7 @@ export const PALETTE = {
 	dot: '#3574f0',
 	negative: '#e06c6c',
 	positive: '#6cc47a',
+	flag: '#e0904a',
 	shadow: '#00000080',
 	outline: '#ffffff',
 	'table-edge': '#2e1a10',
