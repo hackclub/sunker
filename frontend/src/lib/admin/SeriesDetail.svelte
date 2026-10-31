@@ -15,8 +15,6 @@
 		previousRange,
 		rangeLabel,
 		shares,
-		source,
-		totals,
 		versus,
 		type Analytics,
 		type Granularity,
@@ -40,10 +38,12 @@
 	const change = $derived(delta(metric, value, headline(metric, data, previous, cumulative)));
 	const parts = $derived(
 		metric.parts &&
-			shares(totals(source(data, range).series, metric.parts.map((part) => part.key), range)).map((row, i) => ({
-				...row,
-				name: metric.parts![i].name
-			}))
+			shares(
+				metric.parts.map((part) => ({
+					name: part.name,
+					value: headline({ ...metric, add: [part.key], sub: undefined, base: undefined }, data, range) ?? 0
+				}))
+			)
 	);
 </script>
 

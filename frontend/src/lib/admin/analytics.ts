@@ -152,12 +152,9 @@ export function points(
 		buckets.set(key, bucket);
 	}
 	return [...buckets.values()].map((bucket) => {
-		let value: number | null;
-		if (metric.kind === 'level') value = bucket.runNum;
-		else if (metric.kind === 'ratio') {
-			const [num, den] = cumulative ? [bucket.runNum, bucket.runDen] : [bucket.num, bucket.den];
-			value = den ? num / den : null;
-		} else value = cumulative ? bucket.runNum : bucket.num;
+		const [num, den] =
+			metric.kind === 'level' || cumulative ? [bucket.runNum, bucket.runDen] : [bucket.num, bucket.den];
+		const value = metric.base ? (den ? num / den : null) : num;
 		const label = granularity === 'week' ? `Week of ${longDate(bucket.start)}` : longLabel(bucket.start);
 		return { label, short: shortLabel(bucket.start), value };
 	});
@@ -276,8 +273,8 @@ export const METRICS: Record<string, Metric> = Object.fromEntries(
 			{
 				key: 'feedback',
 				title: 'Feedback NPS',
-				description: 'Net promoter score: % promoters (9 to 10) minus % detractors (6 or below), from -100 to +100',
-				kind: 'ratio',
+				description: 'Net promoter score over all feedback so far: % promoters (9 to 10) minus % detractors (6 or below), from -100 to +100',
+				kind: 'level',
 				add: ['feedback_promoters'],
 				sub: ['feedback_detractors'],
 				base: 'feedback_count',
