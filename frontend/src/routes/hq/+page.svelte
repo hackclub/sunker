@@ -127,7 +127,7 @@
 	}
 
 	function onpointermove(event: PointerEvent) {
-		hovering = wanted || mining ? null : over(event);
+		hovering = !docked || mining ? null : over(event);
 	}
 
 	const wanted = $derived(params().has('map'));
@@ -333,7 +333,7 @@
 	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
 	<img class="table" src={table} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
-	{#if hovering}
+	{#if hovering && docked}
 		{#if hovering === 'mines'}
 			<svg class="outline seam" viewBox="0 0 {innerWidth} {innerHeight}">
 				<mask id="seam">
@@ -347,7 +347,7 @@
 		{/if}
 		<span class="label" style:top="{top}px">{hovering === 'mines' ? 'Mines' : 'Map'}</span>
 	{/if}
-	<a class="enter" href="?map" aria-label="Open map" class:hovering {onclick} onfocus={() => (hovering = wanted || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
+	<a class="enter" href="?map" aria-label="Open map" class:hovering {onclick} onfocus={() => (hovering = !docked || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
 	<a
 		class="dig"
 		href="?mines"
@@ -356,7 +356,7 @@
 			event.preventDefault();
 			if (!wanted && !mining) dig();
 		}}
-		onfocus={() => (hovering = wanted || mining ? null : 'mines')}
+		onfocus={() => (hovering = !docked || mining ? null : 'mines')}
 		onblur={() => (hovering = null)}
 	></a>
 
