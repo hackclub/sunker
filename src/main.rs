@@ -5,6 +5,7 @@ mod analytics;
 mod auth;
 mod chats;
 mod database;
+mod moderation;
 
 use actix_files::{Files, NamedFile};
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, fn_service};
@@ -89,6 +90,15 @@ async fn main() -> std::io::Result<()> {
             .service(map)
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((chats::list, chats::messages, chats::create, chats::flag))
+            .service((
+                moderation::chats,
+                moderation::messages,
+                moderation::send,
+                moderation::flags,
+                moderation::dismiss,
+                moderation::delete,
+                moderation::ban,
+            ))
             .service(admin::check)
             .service((analytics::visit, analytics::dashboard))
             .service((admin_users::list, admin_users::show, admin_users::private, admin_users::action))

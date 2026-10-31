@@ -3,7 +3,8 @@ use actix_web::{HttpRequest, HttpResponse, get, post, web};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-const ACCESS: &str = "chat.id = ANY(\"user\".allowed_chats)";
+const ACCESS: &str = "CASE WHEN \"user\".is_banned THEN chat.user_id = \"user\".id
+                      ELSE chat.id = ANY(\"user\".allowed_chats) END";
 
 async fn allowed(req: &HttpRequest, pool: &PgPool) -> sqlx::Result<Option<Vec<Value>>> {
     let Some(user) = auth::user_id(req, pool).await? else {

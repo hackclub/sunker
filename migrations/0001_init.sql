@@ -195,7 +195,8 @@ CREATE TABLE chat (
     id SERIAL PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
-    guild_id INTEGER UNIQUE REFERENCES guild (id)
+    guild_id INTEGER UNIQUE REFERENCES guild (id),
+    user_id INTEGER UNIQUE REFERENCES "user" (id)
 );
 
 CREATE TABLE message (
@@ -307,6 +308,17 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER user_rows AFTER INSERT ON "user" FOR EACH ROW EXECUTE FUNCTION create_user_rows();
 
+CREATE FUNCTION create_moderation_chat() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO chat (slug, name, user_id) VALUES ('moderation-' || NEW.id, 'Moderators', NEW.id)
+    ON CONFLICT DO NOTHING;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER user_banned AFTER INSERT OR UPDATE OF is_banned ON "user" FOR EACH ROW
+WHEN (NEW.is_banned) EXECUTE FUNCTION create_moderation_chat();
+
 CREATE INDEX user_guild_id ON "user" (guild_id);
 CREATE INDEX user_referred_by ON "user" (referred_by);
 CREATE INDEX session_user_id ON session (user_id);
@@ -320,6 +332,7 @@ CREATE INDEX order_user_id ON "order" (user_id);
 CREATE INDEX order_unfulfilled ON "order" (created_at) WHERE fulfilled_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX message_feed ON message (chat_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX message_reply_to ON message (reply_to);
+CREATE INDEX message_flag_open ON message_flag (created_at) WHERE dismissed_at IS NULL;
 CREATE INDEX analytics_user ON analytics (user_id, kind, created_at);
 CREATE INDEX analytics_created_at ON analytics (created_at);
 CREATE INDEX analytics_visitor ON analytics (visitor_id, created_at) WHERE kind = 'visit';

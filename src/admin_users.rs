@@ -119,7 +119,7 @@ async fn detail(pool: &PgPool, id: i32) -> sqlx::Result<Option<Value>> {
                                 FROM ship s JOIN project p ON p.id = s.project_id WHERE s.reviewer_id = u.id),
              'orders', (SELECT coalesce(jsonb_agg(to_jsonb(o) - 'user_id' - {PRIVATE} || jsonb_build_object('prize_name', z.name, 'prize_ring', z.ring, 'price_cents', z.price_cents) ORDER BY o.created_at DESC), '[]')
                         FROM \"order\" o JOIN prize z ON z.id = o.prize_id WHERE o.user_id = u.id),
-             'chats', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', ch.id, 'name', ch.name, 'allowed', ch.id = ANY(u.allowed_chats)) ORDER BY ch.id), '[]') FROM chat ch),
+             'chats', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', ch.id, 'name', ch.name, 'allowed', ch.id = ANY(u.allowed_chats)) ORDER BY ch.id), '[]') FROM chat ch WHERE ch.user_id IS NULL),
              'guilds', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'name', g.name) ORDER BY g.id), '[]') FROM guild g),
              'message_count', (SELECT count(*) FROM message m WHERE m.author_id = u.id),
              'messages', (SELECT coalesce(jsonb_agg(recent ORDER BY recent.created_at DESC), '[]') FROM (
@@ -281,7 +281,7 @@ async fn apply(
                 .filter_map(|id| id.as_i64().map(|id| id as i32))
                 .collect();
             let result = sqlx::query(
-                "UPDATE \"user\" SET allowed_chats = ARRAY(SELECT id FROM chat WHERE id = ANY($2) ORDER BY id)
+                "UPDATE \"user\" SET allowed_chats = ARRAY(SELECT id FROM chat WHERE id = ANY($2) AND user_id IS NULL ORDER BY id)
                  WHERE id = $1",
             )
             .bind(user)
@@ -290,7 +290,7 @@ async fn apply(
             .await?;
             affected(result, "User")?;
             let names: Vec<String> =
-                sqlx::query_scalar("SELECT name FROM chat WHERE id = ANY($1) ORDER BY id")
+                sqlx::query_scalar("SELECT name FROM chat WHERE id = ANY($1) AND user_id IS NULL ORDER BY id")
                     .bind(&chats)
                     .fetch_all(&mut **tx)
                     .await?;
