@@ -4,19 +4,18 @@
 	let { rows, label = (name: string) => name }: { rows: Row[]; label?: (name: string) => string } = $props();
 
 	const max = $derived(Math.max(0, ...rows.map((row) => row.value)));
+	const details = $derived(rows.some((row) => row.detail));
 </script>
 
-<span class="bars">
+<span class="bars" class:details>
 	{#each rows as row}
 		<span class="row">
 			<span class="name">{label(row.name)}</span>
 			<span class="track">
 				<span class="bar" style:width="{max ? (row.value / max) * 100 : 0}%"></span>
 			</span>
-			<span class="value">
-				{format(row.value)}
-				{#if row.detail}<span class="detail">{row.detail}</span>{/if}
-			</span>
+			<span class="value">{format(row.value)}</span>
+			{#if details}<span class="detail">{row.detail ?? ''}</span>{/if}
 		</span>
 	{/each}
 </span>
@@ -28,6 +27,10 @@
 		row-gap: 2px;
 		column-gap: 12px;
 		align-items: center;
+	}
+
+	.bars.details {
+		grid-template-columns: max-content 1fr max-content max-content;
 	}
 
 	.row {
@@ -70,8 +73,9 @@
 	}
 
 	.detail {
-		margin-left: 6px;
 		color: var(--text-muted);
 		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		text-align: right;
 	}
 </style>
