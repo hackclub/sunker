@@ -13,6 +13,7 @@ export type Access = { superadmin: boolean; permissions: Permissions };
 
 export const TABS = [
 	{ slug: 'analytics', name: 'Analytics' },
+	{ slug: 'users', name: 'Users' },
 	{ slug: 'review', name: 'Review' }
 ] as const;
 

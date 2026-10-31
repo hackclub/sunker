@@ -1,4 +1,5 @@
 mod admin;
+mod admin_users;
 mod analytics;
 mod auth;
 mod chats;
@@ -89,6 +90,7 @@ async fn main() -> std::io::Result<()> {
             .service(chats::list)
             .service(admin::check)
             .service((analytics::visit, analytics::dashboard))
+            .service((admin_users::list, admin_users::show, admin_users::private, admin_users::action))
             .service(
                 Files::new("/", FRONTEND_DIR)
                     .index_file("index.html")
