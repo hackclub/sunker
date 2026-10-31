@@ -46,18 +46,22 @@
 		]
 	});
 
-	const open: Record<Side, boolean> = $state({ left: false, right: false });
+	const slug = (section: Section) => section.label.toLowerCase();
+	const chosen = (side: Side) => panels[side].findIndex((section) => slug(section) === params().get(side));
+	const open: Record<Side, boolean> = $derived({ left: chosen('left') >= 0, right: chosen('right') >= 0 });
 	const active: Record<Side, number> = $state({ left: 0, right: 0 });
+	$effect.pre(() => {
+		for (const side of ['left', 'right'] as const) if (open[side]) active[side] = chosen(side);
+	});
 
 	function toggle(side: Side, index: number) {
-		open[side] = !(open[side] && active[side] === index);
-		active[side] = index;
+		update({ [side]: open[side] && active[side] === index ? null : slug(panels[side][index]) });
 	}
 
 	function onkeydown(event: KeyboardEvent) {
 		if (event.key !== 'Escape' || mining) return;
 		if (wanted) close();
-		else open.left = open.right = false;
+		else if (open.left || open.right) update({ left: null, right: null });
 	}
 
 	const PLANKS = [plank, plank2, plank3];
@@ -366,7 +370,7 @@
 			{#snippet dialog()}
 				<header class={side}>
 					<h2>{section.label}</h2>
-					<button class="close" aria-label="Close" onclick={() => (open[side] = false)}>
+					<button class="close" aria-label="Close" onclick={() => update({ [side]: null })}>
 						<img src={xIcon} alt="" />
 					</button>
 				</header>

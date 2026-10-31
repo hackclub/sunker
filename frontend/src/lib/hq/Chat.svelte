@@ -6,7 +6,8 @@
 		'Shout out into the void...',
 		'Pitter-patter chipper-chatter...',
 		'Come tarnished and speak...',
-		'I have friends everywhere, let us converse...'
+		'I have friends everywhere, let us converse...',
+		"Get yappin'..."
 	];
 
 	let last: string | undefined;
