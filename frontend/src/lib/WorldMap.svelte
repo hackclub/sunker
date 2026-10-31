@@ -6,7 +6,7 @@
 	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile } from '#lib/map.js';
 	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid, unprojector } from '#lib/view.js';
 
-	let { map, table = false, detail = [1, 1] }: { map: HexMap; table?: boolean; detail?: [number, number] } = $props();
+	let { map, table = false, detail = [1, 1], onmine }: { map: HexMap; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
 
 	const LEVEL = 0.1;
 	const GRID = [...rgb(MAP.background), 0.03];
@@ -298,6 +298,10 @@
 		pointer = { x: event.clientX, y: event.clientY };
 	}
 
+	function onclick(event: MouseEvent) {
+		if (pick(event.clientX, event.clientY)?.tile.variants.includes('mine')) onmine?.();
+	}
+
 	$effect(() => {
 		if (table) hovered = null;
 	});
@@ -384,7 +388,7 @@
 
 <svelte:window bind:innerWidth bind:innerHeight />
 
-<div class="map" class:table role="presentation" onpointermove={table ? undefined : onpointermove} onpointerleave={() => (hovered = null)}>
+<div class="map" class:table class:mine={hovered?.tile.variants.includes('mine')} role="presentation" onpointermove={table ? undefined : onpointermove} onpointerleave={() => (hovered = null)} onclick={table ? undefined : onclick}>
 	<canvas bind:this={canvas}></canvas>
 	{#if card}
 		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:left="{pointer.x}px" style:top="{pointer.y}px" bind:clientHeight={cardHeight}>
@@ -413,6 +417,10 @@
 
 	.table {
 		pointer-events: none;
+	}
+
+	.mine {
+		cursor: pointer;
 	}
 
 	canvas {

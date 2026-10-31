@@ -71,12 +71,22 @@ export function squash(tiles: PlacedTile[], width: number, height: number): [num
 	return [scale, scale * FLATTEN];
 }
 
-export function halo(tiles: PlacedTile[], width: number, height: number) {
+function seat(tiles: PlacedTile[], width: number, height: number) {
 	const { scale, rise } = placement(tiles, width, height);
-	const point = ([x, y]: Point) => `${width / 2 + (x - width / 2) * scale} ${height / 2 + (y - height / 2) * scale * FLATTEN - rise}`;
-	return island(tiles, width, height)
-		.map((polygon) => 'M' + polygon.map(point).join('L') + 'Z')
+	return ([x, y]: Point): Point => [width / 2 + (x - width / 2) * scale, height / 2 + (y - height / 2) * scale * FLATTEN - rise];
+}
+
+export function halo(outline: Point[][], tiles: PlacedTile[], width: number, height: number, keep: (tile: PlacedTile) => boolean = () => true) {
+	const point = seat(tiles, width, height);
+	return outline
+		.filter((_, i) => keep(tiles[i]))
+		.map((polygon) => 'M' + polygon.map((p) => point(p).join(' ')).join('L') + 'Z')
 		.join('');
+}
+
+export function crest(outline: Point[][], tiles: PlacedTile[], width: number, height: number) {
+	const point = seat(tiles, width, height);
+	return Math.min(...outline.flatMap((polygon) => polygon.map((p) => point(p)[1])));
 }
 
 export function island(tiles: PlacedTile[], width: number, height: number) {
@@ -94,8 +104,8 @@ function floor(tiles: PlacedTile[]) {
 
 const path = (points: Point[]) => 'M' + points.map(([x, y]) => `${Math.round(x)} ${Math.round(y)}`).join('L') + 'Z';
 
-export function footprint(tiles: PlacedTile[], width: number, height: number) {
-	return `path('${island(tiles, width, height).map(path).join('')}')`;
+export function footprint(outline: Point[][]) {
+	return `path('${outline.map(path).join('')}')`;
 }
 
 export function inside(polygons: Point[][], [px, py]: Point) {
@@ -134,7 +144,7 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 		return [x + CORNERS[i % 6][0], y + CORNERS[i % 6][1]];
 	};
 	const key = ([x, y]: number[]) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
-	const spread: Keyframe[] = [{ '--clip': footprint(tiles, width, height), offset: 0, easing: 'step-end' }];
+	const spread: Keyframe[] = [{ '--clip': footprint(island(tiles, width, height)), offset: 0, easing: 'step-end' }];
 	for (let k = 1; k <= rings; k++) {
 		const edges = new Map<string, number[][]>();
 		for (const [cell, d] of distance) {

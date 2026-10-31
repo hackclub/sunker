@@ -15,10 +15,11 @@
 	import SidePanel, { DIALOG_WIDTH, offset } from '#lib/SidePanel.svelte';
 	import { PALETTE } from '#lib/colors.js';
 	import WorldMap from '#lib/WorldMap.svelte';
-	import { goto } from '$app/navigation';
+	import Mines from '#lib/Mines.svelte';
+	import { params, update } from '#lib/url.svelte.js';
 	import { page } from '$app/state';
-	import { place } from '#lib/map.js';
-	import { FLIGHT, footprint, halo, inside, island, reveal, squash, table as tabled } from '#lib/view.js';
+	import { place, type PlacedTile } from '#lib/map.js';
+	import { FLIGHT, crest, footprint, halo, inside, island, reveal, squash, table as tabled } from '#lib/view.js';
 	import Projects from '#lib/hq/Projects.svelte';
 	import Propaganda from '#lib/hq/Propaganda.svelte';
 	import Help from '#lib/hq/Help.svelte';
@@ -54,7 +55,7 @@
 	}
 
 	function onkeydown(event: KeyboardEvent) {
-		if (event.key !== 'Escape') return;
+		if (event.key !== 'Escape' || mining) return;
 		if (wanted) close();
 		else open.left = open.right = false;
 	}
@@ -110,22 +111,27 @@
 
 	const tiles = $derived(place(data.map));
 	const pose = $derived(tabled(tiles, innerWidth, innerHeight));
-	const clip = $derived(footprint(tiles, innerWidth, innerHeight));
 	const outline = $derived(island(tiles, innerWidth, innerHeight));
-	const border = $derived(halo(tiles, innerWidth, innerHeight));
-	let hovering = $state(false);
+	const clip = $derived(footprint(outline));
+	const border = $derived(halo(outline, tiles, innerWidth, innerHeight));
+	const mine = (tile: PlacedTile) => tile.tile.variants.includes('mine');
+	const shaft = $derived(outline.filter((_, i) => mine(tiles[i])));
+	const seam = $derived(halo(outline, tiles, innerWidth, innerHeight, mine));
+	const top = $derived(crest(outline, tiles, innerWidth, innerHeight));
+	let hovering = $state<'map' | 'mines' | null>(null);
 
 	function over(event: PointerEvent | MouseEvent) {
 		const box = flight.getBoundingClientRect();
 		const point: [number, number] = [((event.clientX - box.left) / box.width) * innerWidth, ((event.clientY - box.top) / box.height) * innerHeight];
-		return inside(outline, point);
+		return inside(shaft, point) ? 'mines' : inside(outline, point) ? 'map' : null;
 	}
 
 	function onpointermove(event: PointerEvent) {
-		hovering = !wanted && over(event);
+		hovering = wanted || mining ? null : over(event);
 	}
 
-	const wanted = $derived((page.shallow?.url ?? page.url).searchParams.has('map'));
+	const wanted = $derived(params().has('map'));
+	const mining = $derived(params().has('mines'));
 	let settled = page.url.searchParams.has('map');
 	let docked = $state(!settled);
 	const detail = $derived.by((): [number, number] => {
@@ -149,12 +155,24 @@
 
 	function onclick(event: MouseEvent) {
 		event.preventDefault();
-		if (!wanted && (event.detail === 0 || over(event))) goto('?map', { state: { map: true }, shallow: true });
+		if (wanted || mining) return;
+		const target = event.detail === 0 ? 'map' : over(event);
+		if (target === 'map') update({ map: true }, { state: { map: true } });
+		if (target === 'mines') dig();
+	}
+
+	function dig() {
+		update({ mines: true }, { state: { ...page.state, mines: true } });
+	}
+
+	function leave() {
+		if (page.state.mines) history.back();
+		else update({ mines: null, ring: null }, { replace: true, state: { map: page.state.map } });
 	}
 
 	function close() {
 		if (page.state.map) history.back();
-		else goto(page.url.pathname, { state: {}, shallow: true, replace: true });
+		else update({ map: null }, { replace: true, state: {} });
 	}
 
 	async function fly(opening: boolean) {
@@ -307,7 +325,7 @@
 <svelte:window bind:innerWidth bind:innerHeight {onkeydown} {onpointermove} />
 
 <svelte:head>
-	<title>{wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
+	<title>{mining ? 'Mines' : wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
 </svelte:head>
 
 <div class="hq">
@@ -315,10 +333,32 @@
 	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
 	<img class="table" src={table} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
-	{#if hovering && !wanted}
-		<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
+	{#if hovering}
+		{#if hovering === 'mines'}
+			<svg class="outline seam" viewBox="0 0 {innerWidth} {innerHeight}">
+				<mask id="seam">
+					<rect width={innerWidth} height={innerHeight} fill="white" />
+					<path d={seam} fill="black" stroke="none" />
+				</mask>
+				<path d={seam} stroke-width={innerWidth / 256} mask="url(#seam)" />
+			</svg>
+		{:else}
+			<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
+		{/if}
+		<span class="label" style:top="{top}px">{hovering === 'mines' ? 'Mines' : 'Map'}</span>
 	{/if}
-	<a class="enter" href="?map" aria-label="Open map" class:hovering {onclick}></a>
+	<a class="enter" href="?map" aria-label="Open map" class:hovering {onclick} onfocus={() => (hovering = wanted || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
+	<a
+		class="dig"
+		href="?mines"
+		aria-label="Open mines"
+		onclick={(event) => {
+			event.preventDefault();
+			if (!wanted && !mining) dig();
+		}}
+		onfocus={() => (hovering = wanted || mining ? null : 'mines')}
+		onblur={() => (hovering = null)}
+	></a>
 
 	{#each ['left', 'right'] as const as side}
 		{@const section = panels[side][active[side]]}
@@ -357,13 +397,17 @@
 	{/each}
 
 	<div class="flight" class:open={wanted} style:transform={wanted ? null : pose} style:--clip={wanted ? null : clip} bind:this={flight}>
-		<WorldMap map={data.map} table={!wanted} {detail} />
+		<WorldMap map={data.map} table={!wanted} {detail} onmine={dig} />
 		{#if wanted}
 			<button class="back" aria-label="Back to HQ" onclick={close}>
 				<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
 			</button>
 		{/if}
 	</div>
+
+	{#if mining}
+		<Mines onback={leave} />
+	{/if}
 </div>
 
 <style>
@@ -421,7 +465,8 @@
 		height: 64px;
 	}
 
-	.tip {
+	.tip,
+	.label {
 		position: absolute;
 		top: 50%;
 		padding: 6px 10px;
@@ -432,6 +477,14 @@
 		transform: translateY(-50%);
 		pointer-events: none;
 		visibility: hidden;
+	}
+
+	.label {
+		position: fixed;
+		left: 50%;
+		z-index: 11;
+		transform: translate(-50%, calc(-100% - 16px));
+		visibility: visible;
 	}
 
 	.tip.left {
@@ -523,6 +576,11 @@
 		stroke-linejoin: round;
 	}
 
+	.seam {
+		z-index: 11;
+		fill: none;
+	}
+
 	.flight {
 		position: fixed;
 		inset: 0;
@@ -568,6 +626,14 @@
 
 	.enter.hovering {
 		cursor: pointer;
+	}
+
+	.dig {
+		position: fixed;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
 	}
 
 	.table {
