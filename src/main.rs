@@ -1,3 +1,4 @@
+mod admin;
 mod auth;
 mod chats;
 mod database;
@@ -85,6 +86,7 @@ async fn main() -> std::io::Result<()> {
             .service(map)
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service(chats::list)
+            .service(admin::check)
             .service(
                 Files::new("/", FRONTEND_DIR)
                     .index_file("index.html")

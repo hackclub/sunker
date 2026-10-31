@@ -216,6 +216,19 @@ CREATE TABLE analytics (
     CHECK ((kind = 'visit') = (user_id IS NULL))
 );
 
+CREATE TABLE permission (
+    user_id INTEGER PRIMARY KEY REFERENCES "user" (id),
+    analytics BOOLEAN NOT NULL DEFAULT false,
+    users BOOLEAN NOT NULL DEFAULT false,
+    ban BOOLEAN NOT NULL DEFAULT false,
+    resources BOOLEAN NOT NULL DEFAULT false,
+    chats BOOLEAN NOT NULL DEFAULT false,
+    moderation BOOLEAN NOT NULL DEFAULT false,
+    administration BOOLEAN NOT NULL DEFAULT false,
+    review BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE admin_action (
     id SERIAL PRIMARY KEY,
     admin_id INTEGER NOT NULL REFERENCES "user" (id),
