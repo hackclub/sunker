@@ -43,6 +43,7 @@ CREATE TABLE "user" (
     referral_code TEXT NOT NULL UNIQUE DEFAULT random_referral_code(),
     referred_by INTEGER REFERENCES "user" (id),
     guild_id INTEGER REFERENCES guild (id),
+    allowed_chats INTEGER[] NOT NULL DEFAULT '{}',
     is_banned BOOLEAN NOT NULL DEFAULT false,
     timezone TEXT,
     onboarding_step TEXT,
@@ -191,7 +192,10 @@ CREATE TABLE "order" (
 );
 
 CREATE TABLE chat (
-    id SERIAL PRIMARY KEY
+    id SERIAL PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    guild_id INTEGER UNIQUE REFERENCES guild (id)
 );
 
 CREATE TABLE message (

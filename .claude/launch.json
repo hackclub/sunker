@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "database",
+      "runtimeExecutable": "nix",
+      "runtimeArgs": ["shell", "nixpkgs#postgresql", "-c", "sh", "-c", "[ -d .postgres ] || initdb -D .postgres -U sunker --auth=trust >/dev/null; exec postgres -D .postgres -p 5433 -c listen_addresses=127.0.0.1 -c unix_socket_directories=''"],
+      "port": 5433
+    },
+    {
       "name": "backend",
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "cargo run"],
