@@ -14,7 +14,15 @@ export type Access = { superadmin: boolean; permissions: Permissions };
 export const TABS = [
 	{ slug: 'analytics', name: 'Analytics' },
 	{ slug: 'users', name: 'Users' },
+	{ slug: 'administration', name: 'Administration' },
 	{ slug: 'review', name: 'Review' }
+] as const;
+
+export const ACTIONS = [
+	{ slug: 'ban', name: 'Ban / delete' },
+	{ slug: 'resources', name: 'Resources' },
+	{ slug: 'chats', name: 'Chats / guild' },
+	{ slug: 'moderation', name: 'Moderation' }
 ] as const;
 
 export const allowedTabs = (access: Access) => TABS.filter((tab) => access.permissions[tab.slug]);

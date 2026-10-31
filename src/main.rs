@@ -1,4 +1,5 @@
 mod admin;
+mod admin_permissions;
 mod admin_users;
 mod analytics;
 mod auth;
@@ -91,6 +92,15 @@ async fn main() -> std::io::Result<()> {
             .service(admin::check)
             .service((analytics::visit, analytics::dashboard))
             .service((admin_users::list, admin_users::show, admin_users::private, admin_users::action))
+            .service((
+                admin_permissions::list,
+                admin_permissions::candidates,
+                admin_permissions::add,
+                admin_permissions::update,
+                admin_permissions::remove,
+                admin_permissions::audit,
+                admin_permissions::audit_filters,
+            ))
             .service(
                 Files::new("/", FRONTEND_DIR)
                     .index_file("index.html")
