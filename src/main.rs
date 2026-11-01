@@ -6,7 +6,9 @@ mod auth;
 mod chats;
 mod database;
 mod joel;
+mod mines;
 mod moderation;
+mod projects;
 mod territory;
 
 use actix_files::{Files, NamedFile};
@@ -100,6 +102,16 @@ async fn main() -> std::io::Result<()> {
             .service(health)
             .service(map)
             .service(territory::list)
+            .service(mines::list)
+            .service((
+                mines::overview,
+                mines::create_contract,
+                mines::save_contract,
+                mines::remove_contract,
+                mines::create_prize,
+                mines::save_prize,
+                mines::remove_prize,
+            ))
             .service(joel::announcements)
             .service((
                 joel::overview,
@@ -110,6 +122,17 @@ async fn main() -> std::io::Result<()> {
                 joel::announce,
                 joel::unannounce,
                 joel::edit,
+            ))
+            .service((
+                projects::list,
+                projects::create,
+                projects::save,
+                projects::remove,
+                projects::upload,
+                projects::screenshot,
+                projects::hackatime_list,
+                projects::link,
+                projects::linked,
             ))
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((chats::list, chats::messages, chats::create, chats::flag))

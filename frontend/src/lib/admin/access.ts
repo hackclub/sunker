@@ -8,6 +8,7 @@ export type Permissions = {
 	administration: boolean;
 	review: boolean;
 	joel: boolean;
+	mines: boolean;
 };
 
 export type Access = { superadmin: boolean; permissions: Permissions };
@@ -18,7 +19,8 @@ export const TABS = [
 	{ slug: 'administration', name: 'Administration' },
 	{ slug: 'review', name: 'Review' },
 	{ slug: 'moderation', name: 'Moderation' },
-	{ slug: 'joel', name: 'Joel View' }
+	{ slug: 'joel', name: 'Joel View' },
+	{ slug: 'mines', name: 'Mines' }
 ] as const;
 
 export const ACTIONS = [

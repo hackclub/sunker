@@ -24,16 +24,17 @@
 			</svg>
 		</button>
 	</header>
-	{@render children?.()}
+	<div class="content">
+		{@render children?.()}
+	</div>
 </dialog>
 
 <style>
 	dialog {
-		width: min(640px, calc(100vw - 32px));
-		min-height: 320px;
+		width: min(440px, calc(100vw - 32px));
 		padding: 0;
 		border: 1px solid var(--island-border);
-		border-radius: var(--radius);
+		border-radius: 6px;
 		background: var(--island);
 		color: var(--text);
 		box-shadow: 0 16px 48px var(--shadow);
@@ -53,24 +54,28 @@
 
 	h2 {
 		margin: 0;
-		font-size: 16px;
-		font-weight: normal;
+		font: 18px 'Share Tech', sans-serif;
 	}
 
-	button {
+	.content {
+		padding: 16px 20px 20px;
+		font: 13px/1.5 'Inter', sans-serif;
+	}
+
+	header button {
 		display: grid;
 		place-items: center;
 		width: 28px;
 		height: 28px;
 		padding: 0;
 		border: none;
-		border-radius: var(--radius-small);
+		border-radius: 6px;
 		background: none;
 		color: var(--text-muted);
 		cursor: pointer;
 	}
 
-	button:hover {
+	header button:hover {
 		background: var(--hover);
 		color: var(--text);
 	}

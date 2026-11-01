@@ -24,7 +24,8 @@ export default defineConfig({
 			'/api': 'http://localhost:4400',
 			'/login': 'http://localhost:4400',
 			'/callback': 'http://localhost:4400',
-			'/logout': 'http://localhost:4400'
+			'/logout': 'http://localhost:4400',
+			'/hackatime': 'http://localhost:4400'
 		}
 	}
 });

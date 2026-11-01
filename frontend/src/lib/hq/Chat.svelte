@@ -142,7 +142,7 @@
 	{:else}
 		<nav>
 			{#each chats as chat (chat.id)}
-				<button class:selected={chat.id === selected} onclick={() => update({ chat: chat.id })}>{chat.name}</button>
+				<button class="button" class:primary={chat.id === selected} onclick={() => update({ chat: chat.id })}>{chat.name}</button>
 			{/each}
 		</nav>
 		<div class="messages" bind:this={scroller}>
@@ -179,23 +179,6 @@
 
 	nav button {
 		flex: none;
-		padding: 8px 16px;
-		border: 1px solid var(--island-border);
-		border-radius: 6px;
-		background: var(--background);
-		color: var(--text-muted);
-		font: inherit;
-		cursor: pointer;
-	}
-
-	nav button:hover {
-		background: var(--hover);
-		color: var(--text);
-	}
-
-	nav button.selected {
-		border-color: var(--accent);
-		color: var(--text);
 	}
 
 	.messages {

@@ -111,13 +111,13 @@ async fn detail(pool: &PgPool, id: i32) -> sqlx::Result<Option<Value>> {
                         FROM resource_ledger l WHERE l.user_id = u.id),
              'ledger_by', (SELECT coalesce(jsonb_agg(to_jsonb(l) - 'admin_id' || jsonb_build_object('user', (SELECT {person} FROM \"user\" x WHERE x.id = l.user_id)) ORDER BY l.created_at DESC), '[]')
                            FROM resource_ledger l WHERE l.admin_id = u.id),
-             'projects', (SELECT coalesce(jsonb_agg(to_jsonb(p) - 'user_id' || jsonb_build_object('list_name', e.display_name, 'ring', e.ring) ORDER BY p.created_at DESC), '[]')
-                          FROM project p JOIN project_list_entry e ON e.slug = p.list_slug WHERE p.user_id = u.id),
+             'projects', (SELECT coalesce(jsonb_agg(to_jsonb(p) - 'user_id' || jsonb_build_object('contract_name', e.name, 'ring', e.ring) ORDER BY p.created_at DESC), '[]')
+                          FROM project p JOIN contract e ON e.slug = p.contract_slug WHERE p.user_id = u.id),
              'ships', (SELECT coalesce(jsonb_agg(to_jsonb(s) || jsonb_build_object('project_name', p.name, 'reviewer', (SELECT {person} FROM \"user\" x WHERE x.id = s.reviewer_id)) ORDER BY s.created_at DESC), '[]')
                        FROM ship s JOIN project p ON p.id = s.project_id WHERE p.user_id = u.id),
              'reviewed_ships', (SELECT coalesce(jsonb_agg(to_jsonb(s) || jsonb_build_object('project_name', p.name, 'owner', (SELECT {person} FROM \"user\" x WHERE x.id = p.user_id)) ORDER BY s.decided_at DESC NULLS LAST), '[]')
                                 FROM ship s JOIN project p ON p.id = s.project_id WHERE s.reviewer_id = u.id),
-             'orders', (SELECT coalesce(jsonb_agg(to_jsonb(o) - 'user_id' - {PRIVATE} || jsonb_build_object('prize_name', z.name, 'prize_ring', z.ring, 'price_cents', z.price_cents) ORDER BY o.created_at DESC), '[]')
+             'orders', (SELECT coalesce(jsonb_agg(to_jsonb(o) - 'user_id' - {PRIVATE} || jsonb_build_object('prize_name', z.name, 'prize_ring', z.ring, 'base_cost_cents', z.base_cost_cents) ORDER BY o.created_at DESC), '[]')
                         FROM \"order\" o JOIN prize z ON z.id = o.prize_id WHERE o.user_id = u.id),
              'chats', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', ch.id, 'name', ch.name, 'allowed', ch.id = ANY(u.allowed_chats)) ORDER BY ch.id), '[]') FROM chat ch WHERE ch.user_id IS NULL),
              'guilds', (SELECT coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'name', g.name) ORDER BY g.id), '[]') FROM guild g),

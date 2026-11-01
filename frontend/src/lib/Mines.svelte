@@ -1,30 +1,8 @@
-<script lang="ts">
-	import { cubicOut } from 'svelte/easing';
-	import { fade } from 'svelte/transition';
-	import Dialog from '#lib/Dialog.svelte';
-	import building1 from '#lib/assets/images/building1.png';
-	import building2 from '#lib/assets/images/building2.png';
+<script lang="ts" module>
 	import { BASES } from '#lib/bases.js';
-	import { PALETTE, rgb } from '#lib/colors.js';
+	import { rgb } from '#lib/colors.js';
 	import { RING_CHARSETS, RING_COUNT } from '#lib/rings.svelte.js';
-	import { params, update } from '#lib/url.svelte.js';
-	import { page } from '$app/state';
 
-	let { onback }: { onback: () => void } = $props();
-
-	const SIDES = 48;
-	const RADIUS = 1;
-	const LEDGE = 0.11;
-	const WALL = 0.13;
-	const RIM = 0.8;
-	const SKY = [16, 6, 4];
-	const PERSPECTIVE = 1.2;
-	const PITCH = 14;
-	const YAW = 20;
-	const FORWARD = 0.8;
-	const DEPTH = 0.1;
-	const RISE = 0.16;
-	const NEAR = 0.15;
 	const BANDS = 3;
 	const CELL = [9, 16];
 	const TILE = [20, 8];
@@ -32,53 +10,17 @@
 	const CHURN = 0.08;
 	const SHARP = 3;
 	const FRAMES = 4;
-	const STEP = 700;
-	const BUILDINGS = [building1, building2];
-	const TOWERS = [
-		[-3.6, 0.55],
-		[-3, 0.75],
-		[-2.3, 0.48],
-		[-1.4, 0.85],
-		[-0.6, 0.52],
-		[0.3, 0.7],
-		[1, 0.46],
-		[1.9, 0.62]
-	];
-	const ENTER = 450;
-	const LEAVE = 250;
 	const DIRT = rgb(BASES.dirt.flat);
 	const GRAY = rgb('#2a2b2d');
-	const SLICE = Math.tan(Math.PI / SIDES) * 2;
-	const CORNER = 1 / Math.cos(Math.PI / SIDES);
 
 	const tint = (light: number, depth = 0, alpha = 1) =>
 		`rgb(${DIRT.map((c, i) => Math.round((Math.min(1, c * light) * (1 - depth) + GRAY[i] * depth) * 255)).join(' ')} / ${alpha})`;
-	const ANGLES = Array.from({ length: SIDES }, (_, k) => (k * 360) / SIDES - 180);
-	const radians = (degrees: number) => (degrees * Math.PI) / 180;
-	const around = (radius: number) => ANGLES.filter((angle) => radius * Math.cos(radians(angle - YAW)) + FORWARD * Math.cos(radians(YAW)) > NEAR);
 
-	function annulus(outer: number, inner: number) {
-		const circle = (r: number) => `M ${outer - r} ${outer} a ${r} ${r} 0 1 0 ${2 * r} 0 a ${r} ${r} 0 1 0 ${-2 * r} 0 Z`;
-		return {
-			width: `${2 * outer}px`,
-			height: `${outer + Math.min(outer, (FORWARD * Math.cos(radians(YAW)) - NEAR) * unit)}px`,
-			clip: `path(evenodd, '${circle(outer)} ${circle(inner)}')`,
-			transform: `rotateY(${YAW}deg) rotateX(90deg) translate(${-outer}px, ${-outer}px)`
-		};
-	}
+	let baking: Promise<string[][]> | undefined;
+	let baked: string[][] | undefined;
 
-	let innerWidth = $state(window.innerWidth);
-	let innerHeight = $state(window.innerHeight);
-	const unit = $derived(Math.min(innerHeight, innerWidth * 0.75));
-	const perspective = $derived(PERSPECTIVE * innerHeight);
-
-	let textures: string[][] = $state([]);
-	let tick = $state(0);
-
-	$effect(() => {
-		let cancelled = false;
-		const urls: string[] = [];
-		document.fonts.load(FONT).then(async () => {
+	export function bake() {
+		return (baking ??= document.fonts.load(FONT).then(async () => {
 			let light = 0.62;
 			const rings = RING_CHARSETS.toReversed().map((set, i) => {
 				const pick = () => set[Math.floor(Math.random() * set.length)];
@@ -99,22 +41,98 @@
 					context.textBaseline = 'top';
 					context.fillStyle = color;
 					cells.forEach((cell, k) => context.fillText(cell, (k % TILE[0]) * CELL[0], Math.floor(k / TILE[0]) * CELL[1]));
-					return new Promise<string>((resolve) =>
-						canvas.toBlob((blob) => {
-							urls.push(URL.createObjectURL(blob!));
-							resolve(`url("${urls.at(-1)}")`);
-						})
-					);
+					return new Promise<string>((resolve) => canvas.toBlob((blob) => resolve(URL.createObjectURL(blob!))));
 				};
 				return Promise.all([draw(base), ...Array.from({ length: FRAMES }, () => draw(base.map((cell) => (Math.random() < CHURN ? pick() : cell))))]);
 			});
-			const drawn = (await Promise.all(rings)).toReversed();
-			if (!cancelled) textures = drawn;
-		});
-		return () => {
-			cancelled = true;
-			urls.forEach((url) => URL.revokeObjectURL(url));
+			const urls = await Promise.all(rings);
+			await Promise.all(
+				urls.flat().map((url) => {
+					const image = new Image();
+					image.src = url;
+					return image.decode();
+				})
+			);
+			return (baked = urls.map((frames) => frames.map((url) => `url("${url}")`)).toReversed());
+		}));
+	}
+</script>
+
+<script lang="ts">
+	import { cubicOut } from 'svelte/easing';
+	import { untrack } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { RESOURCE_NAMES } from '#lib/admin/analytics.js';
+	import building1 from '#lib/assets/images/building1.png';
+	import building2 from '#lib/assets/images/building2.png';
+	import { PALETTE } from '#lib/colors.js';
+	import Dialog from '#lib/Dialog.svelte';
+	import { request } from '#lib/joel/joel.js';
+	import type { Prize, Contract } from '#lib/mines.js';
+	import { load } from '#lib/projects.svelte.js';
+	import { params, update } from '#lib/url.svelte.js';
+
+	let { onback }: { onback: () => void } = $props();
+
+	const SIDES = 48;
+	const RADIUS = 1;
+	const LEDGE = 0.11;
+	const WALL = 0.13;
+	const RIM = 0.8;
+	const SKY = [16, 6, 4];
+	const PERSPECTIVE = 1.2;
+	const PITCH = 14;
+	const YAW = 20;
+	const FORWARD = 0.8;
+	const DEPTH = 0.1;
+	const RISE = 0.16;
+	const NEAR = 0.15;
+	const STEP = 700;
+	const BUILDINGS = [building1, building2];
+	const TOWERS = [
+		[-3.6, 0.55],
+		[-3, 0.75],
+		[-2.3, 0.48],
+		[-1.4, 0.85],
+		[-0.6, 0.52],
+		[0.3, 0.7],
+		[1, 0.46],
+		[1.9, 0.62]
+	];
+	const TABS = [
+		['projects', 'Project Templates'],
+		['prizes', 'Prizes']
+	] as const;
+	const RINGS = Array.from({ length: RING_COUNT }, (_, i) => RING_COUNT - 1 - i);
+	const ENTER = 450;
+	const LEAVE = 250;
+	const SLICE = Math.tan(Math.PI / SIDES) * 2;
+	const CORNER = 1 / Math.cos(Math.PI / SIDES);
+
+	const ANGLES = Array.from({ length: SIDES }, (_, k) => (k * 360) / SIDES - 180);
+	const radians = (degrees: number) => (degrees * Math.PI) / 180;
+	const around = (radius: number) => ANGLES.filter((angle) => radius * Math.cos(radians(angle - YAW)) + FORWARD * Math.cos(radians(YAW)) > NEAR);
+
+	function annulus(outer: number, inner: number) {
+		const circle = (r: number) => `M ${outer - r} ${outer} a ${r} ${r} 0 1 0 ${2 * r} 0 a ${r} ${r} 0 1 0 ${-2 * r} 0 Z`;
+		return {
+			width: `${2 * outer}px`,
+			height: `${outer + Math.min(outer, (FORWARD * Math.cos(radians(YAW)) - NEAR) * unit)}px`,
+			clip: `path(evenodd, '${circle(outer)} ${circle(inner)}')`,
+			transform: `rotateY(${YAW}deg) rotateX(90deg) translate(${-outer}px, ${-outer}px)`
 		};
+	}
+
+	let innerWidth = $state(window.innerWidth);
+	let innerHeight = $state(window.innerHeight);
+	const unit = $derived(Math.min(innerHeight, innerWidth * 0.75));
+	const perspective = $derived(PERSPECTIVE * innerHeight);
+
+	let textures = $state(baked ?? []);
+	let tick = $state(0);
+
+	$effect(() => {
+		bake().then((drawn) => (textures = drawn));
 	});
 
 	$effect(() => {
@@ -156,23 +174,54 @@
 	let cardHeight = $state(0);
 
 	const ring = $derived(terraces.find(({ ring }) => String(ring) === params().get('ring'))?.ring);
-	const open = $derived(ring !== undefined);
-	let selected = $state(0);
-	$effect.pre(() => {
-		if (ring !== undefined) selected = ring;
+
+	let mines = $state<{ contracts: Contract[]; prizes: Prize[] } | null>(null);
+	let broken = $state(false);
+	let claiming = $state<string | null>(null);
+	let claimed = $state(false);
+	let failure = $state('');
+	let tab = $state<(typeof TABS)[number][0]>('projects');
+	let list = $state<HTMLElement>();
+	const sections: Record<number, HTMLElement> = {};
+
+	$effect(() => {
+		fetch('/api/mines', { cache: 'no-cache' })
+			.then((response) => (response.ok ? response.json() : Promise.reject()))
+			.then((data) => (mines = data))
+			.catch(() => (broken = true));
 	});
 
-	function choose(ring: number) {
-		update({ ring }, { state: { ...page.state, ring: true } });
+	$effect(() => {
+		tab;
+		if (mines) untrack(() => ring !== undefined && reveal(ring, false));
+	});
+
+	function reveal(ring: number, smooth: boolean) {
+		const section = sections[ring];
+		if (!list || !section) return;
+		list.scrollTo({ top: section.offsetTop, behavior: smooth && duration(false) ? 'smooth' : 'instant' });
 	}
 
-	function dismiss() {
-		if (page.state.ring) history.back();
-		else update({ ring: null }, { replace: true });
+	function choose(ring: number) {
+		update({ ring }, { replace: true });
+		reveal(ring, true);
+	}
+
+	async function embark(contract: Contract) {
+		claiming = contract.slug;
+		try {
+			await request('POST', '/api/projects', { contract: contract.slug });
+			failure = '';
+			load();
+		} catch (e) {
+			failure = e instanceof Error ? e.message : String(e);
+		}
+		claiming = null;
+		claimed = true;
 	}
 
 	function onescape(event: KeyboardEvent) {
-		if (event.key === 'Escape' && !open) onback();
+		if (event.key === 'Escape' && !claimed) onback();
 	}
 
 	function onkeydown(event: KeyboardEvent, ring: number) {
@@ -193,13 +242,6 @@
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight onkeydown={onescape} />
-
-<svelte:head>
-	<link
-		rel="stylesheet"
-		href="https://fonts.googleapis.com/css2?family=Share+Tech&family=JetBrains+Mono&display=swap"
-	/>
-</svelte:head>
 
 <div class="mines" style:--pit={tint(0.45, 0.4)} style:--sky={PALETTE.sky} style:--horizon={PALETTE.horizon} transition:fade={{ duration: duration(false) / 2 }}>
 	<div class="stage" style:perspective="{perspective}px" role="presentation" onpointermove={(event) => (pointer = { x: event.clientX, y: event.clientY })}>
@@ -257,13 +299,80 @@
 		</div>
 	</div>
 
-	{#if hovered !== null && !open}
+	{#if hovered !== null}
 		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:translate="{pointer.x}px {pointer.y}px" bind:clientHeight={cardHeight}>
 			<h2>Ring {hovered}</h2>
 		</div>
 	{/if}
 
-	<Dialog bind:open={() => open, (value) => value || !open || dismiss()} title="Ring {selected}" />
+	<aside class="panel">
+		<div class="tabs" role="tablist">
+			{#each TABS as [key, label] (key)}
+				<button role="tab" aria-selected={tab === key} class:active={tab === key} onclick={() => (tab = key)}>{label}</button>
+			{/each}
+		</div>
+		<div class="list" bind:this={list}>
+			{#each RINGS as section (section)}
+				{@const contracts = mines?.contracts.filter((contract) => contract.ring === section) ?? []}
+				{@const prizes = mines?.prizes.filter((prize) => prize.ring === section) ?? []}
+				<section bind:this={sections[section]}>
+					<h2 class="heading" class:selected={ring === section}>Ring {section}</h2>
+					{#if broken}
+						<p class="empty">Couldn't load the mines</p>
+					{:else if mines && !(tab === 'projects' ? contracts : prizes).length}
+						<p class="empty">Nothing here yet</p>
+					{/if}
+					{#if tab === 'projects'}
+						{#each contracts as contract (contract.slug)}
+							<article class="item">
+								{#if contract.image_url}
+									<img src={contract.image_url} alt="" />
+								{/if}
+								<h3>{contract.name}</h3>
+								{#if contract.description}
+									<p>{contract.description}</p>
+								{/if}
+								{#if contract.criteria.length}
+									<ul class="criteria">
+										{#each contract.criteria as criterion, i (i)}
+											<li>{criterion}</li>
+										{/each}
+									</ul>
+								{/if}
+								{#if Object.keys(contract.resources).length}
+									<ul class="resources">
+										{#each Object.entries(contract.resources) as [name, amount] (name)}
+											<li>+{amount} {RESOURCE_NAMES[name] ?? name}</li>
+										{/each}
+									</ul>
+								{/if}
+								{#if contract.video_url}
+									<a href={contract.video_url} target="_blank" rel="noreferrer">Watch the video</a>
+								{/if}
+								<button class="button primary embark" disabled={claiming !== null} onclick={() => embark(contract)}>{claiming === contract.slug ? 'Embarking...' : 'Embark'}</button>
+							</article>
+						{/each}
+					{:else}
+						{#each prizes as prize (prize.id)}
+							<article class="item">
+								{#if prize.tagline}
+									<p class="tagline">{prize.tagline}</p>
+								{/if}
+								<h3>{prize.name}</h3>
+								{#if prize.description}
+									<p>{prize.description}</p>
+								{/if}
+							</article>
+						{/each}
+					{/if}
+				</section>
+			{/each}
+		</div>
+	</aside>
+
+	<Dialog bind:open={claimed} title={failure ? "Couldn't claim that contract" : 'Contract claimed'}>
+		<p class="claimed">{failure || 'Contract claimed and project created, check the main HQ dashboard!'}</p>
+	</Dialog>
 
 	<h1 class="title">The Mine of Projects</h1>
 
@@ -274,15 +383,13 @@
 
 <style>
 	.mines {
-		--radius: 12px;
-		--radius-small: 6px;
 		position: fixed;
 		inset: 0;
 		z-index: 30;
 		overflow: hidden;
 		background: var(--pit);
 		color: var(--text);
-		font-family: 'Share Tech', sans-serif;
+		font: 13px/1.5 'Inter', sans-serif;
 		color-scheme: dark;
 	}
 
@@ -379,10 +486,9 @@
 		min-width: 120px;
 		padding: 10px 14px;
 		border: 1px solid var(--island-border);
-		border-radius: 12px;
+		border-radius: 6px;
 		background: var(--island);
 		box-shadow: 0 16px 48px var(--shadow);
-		font: 13px 'Inter', sans-serif;
 		pointer-events: none;
 		transform: translate(var(--dx, 16px), var(--dy, 16px));
 	}
@@ -395,10 +501,149 @@
 		--dy: calc(-100% - 16px);
 	}
 
-	h2 {
+	.card h2 {
 		margin: 0;
-		font-size: 16px;
-		font-weight: 500;
+		font: 18px 'Share Tech', sans-serif;
+	}
+
+	.panel {
+		position: fixed;
+		top: 16px;
+		right: 16px;
+		bottom: 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		width: min(360px, calc(100vw - 32px));
+		padding: 12px;
+		border: 1px solid var(--island-border);
+		border-radius: 6px;
+		background: var(--island);
+	}
+
+	.tabs {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		flex-shrink: 0;
+		height: 40px;
+		border: 1px solid var(--accent);
+		border-radius: 6px;
+		overflow: hidden;
+	}
+
+	.tabs button {
+		border: none;
+		background: none;
+		color: var(--accent);
+		font: 500 13px 'Inter', sans-serif;
+		cursor: pointer;
+	}
+
+	.tabs button:not(.active):hover {
+		background: color-mix(in srgb, var(--accent) 15%, transparent);
+	}
+
+	.tabs button.active {
+		background: var(--accent);
+		color: var(--background);
+	}
+
+	.list {
+		position: relative;
+		flex: 1;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	section {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding-bottom: 16px;
+	}
+
+	.heading {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		margin: 0;
+		padding: 4px 0 8px;
+		background: var(--island);
+		color: var(--text-muted);
+		font: 18px 'Share Tech', sans-serif;
+	}
+
+	.heading.selected {
+		color: var(--accent);
+	}
+
+	.empty {
+		margin: 0;
+		color: var(--text-muted);
+	}
+
+	.item {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 12px;
+		border: 1px solid var(--island-border);
+		border-radius: 6px;
+	}
+
+	.item img {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		border-radius: 4px;
+		object-fit: cover;
+	}
+
+	.item h3 {
+		margin: 0;
+		font: 18px 'Share Tech', sans-serif;
+	}
+
+	.item p,
+	.item ul {
+		margin: 0;
+	}
+
+	.item ul {
+		padding-left: 18px;
+	}
+
+	.tagline {
+		color: var(--text-muted);
+		font-style: italic;
+	}
+
+	.item .resources {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		padding: 0;
+		list-style: none;
+	}
+
+	.resources li {
+		padding: 2px 6px;
+		border-radius: 4px;
+		background: var(--background);
+		color: var(--positive);
+		font-size: 12px;
+	}
+
+	.item a {
+		color: var(--accent);
+	}
+
+	.embark {
+		align-self: flex-start;
+		margin-top: 4px;
+	}
+
+	.claimed {
+		margin: 0;
 	}
 
 	.title {
@@ -413,8 +658,7 @@
 		border: 1px solid var(--island-border);
 		border-radius: 6px;
 		background: var(--island);
-		font-size: 32px;
-		font-weight: 400;
+		font: 32px 'Share Tech', sans-serif;
 		white-space: nowrap;
 		transform: translateX(-50%);
 	}

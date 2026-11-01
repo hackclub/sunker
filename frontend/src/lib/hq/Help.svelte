@@ -104,8 +104,7 @@
 
 	h3 {
 		margin: 0 0 8px;
-		font-size: 16px;
-		font-weight: 500;
+		font: 18px 'Share Tech', sans-serif;
 	}
 
 	ul {
@@ -146,7 +145,8 @@
 
 	article :global(:is(h1, h2, h3, h4, h5, h6)) {
 		margin: 1.2em 0 0.4em;
-		font-weight: 500;
+		font-family: 'Share Tech', sans-serif;
+		font-weight: 400;
 		line-height: 1.3;
 	}
 

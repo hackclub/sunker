@@ -377,7 +377,7 @@ export function funnel(data: Analytics, range: Range): Row[] {
 	});
 }
 
-const RESOURCE_NAMES: Record<string, string> = {
+export const RESOURCE_NAMES: Record<string, string> = {
 	chiprock: 'Chiprock',
 	granite: 'Granite',
 	potash: 'Potash',

@@ -15,7 +15,7 @@
 	import SidePanel, { DIALOG_WIDTH, offset } from '#lib/SidePanel.svelte';
 	import { PALETTE } from '#lib/colors.js';
 	import WorldMap from '#lib/WorldMap.svelte';
-	import Mines from '#lib/Mines.svelte';
+	import Mines, { bake } from '#lib/Mines.svelte';
 	import { params, update } from '#lib/url.svelte.js';
 	import { page } from '$app/state';
 	import { place, type PlacedTile } from '#lib/map.js';
@@ -199,6 +199,11 @@
 		if (wanted === settled) return;
 		settled = wanted;
 		fly(wanted);
+	});
+
+	$effect(() => {
+		const id = (window.requestIdleCallback ?? setTimeout)(() => bake());
+		return () => (window.cancelIdleCallback ?? clearTimeout)(id);
 	});
 
 	$effect(() => {
@@ -421,6 +426,69 @@
 		font: 13px 'Inter', sans-serif;
 	}
 
+	.hq :global(.button) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 7px 14px;
+		border: 1px solid var(--accent);
+		border-radius: 6px;
+		background: transparent;
+		color: var(--accent);
+		font: 500 13px 'Inter', sans-serif;
+		text-decoration: none;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.hq :global(.button:not(.primary, .danger):hover:not(:disabled)) {
+		background: color-mix(in srgb, var(--accent) 15%, transparent);
+	}
+
+	.hq :global(.button.primary) {
+		background: var(--accent);
+		color: var(--background);
+	}
+
+	.hq :global(.button.danger) {
+		border-color: var(--negative);
+		background: var(--negative);
+		color: var(--background);
+	}
+
+	.hq :global(:is(.button.primary, .button.danger):hover:not(:disabled)) {
+		filter: brightness(1.1);
+	}
+
+	.hq :global(.button:disabled) {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.hq :global(.input) {
+		box-sizing: border-box;
+		width: 100%;
+		padding: 7px 10px;
+		border: 1px solid var(--island-border);
+		border-radius: 6px;
+		background: var(--background);
+		color: var(--text);
+		font: 13px 'Inter', sans-serif;
+	}
+
+	.hq :global(.input::placeholder) {
+		color: var(--text-muted);
+	}
+
+	.hq :global(.input:focus) {
+		border-color: var(--accent);
+		outline: none;
+	}
+
+	.hq :global(textarea.input) {
+		resize: vertical;
+	}
+
 	header {
 		display: flex;
 		align-items: center;
@@ -430,9 +498,7 @@
 
 	h2 {
 		margin: 0;
-		font-size: 24px;
-		line-height: 24px;
-		font-weight: 500;
+		font: 24px/24px 'Share Tech', sans-serif;
 	}
 
 	.close {

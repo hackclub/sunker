@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 const CALLBACK: &str = "/callback";
 
-fn site_url(path: &str) -> String {
+pub fn site_url(path: &str) -> String {
     let base_url = hc_helper::keys::base_url();
     let host = match base_url.rsplit_once(':') {
         Some((host, port)) if port.bytes().all(|byte| byte.is_ascii_digit()) => host,
