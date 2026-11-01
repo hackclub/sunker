@@ -7,15 +7,27 @@ export interface Tile {
 	variants?: string[];
 }
 
+export interface Region {
+	name: string;
+	tiles: [number, number][];
+}
+
 export interface HexMap {
 	rows: (Tile | null)[][];
+	regions?: Region[];
 }
+
+export const ENEMIES = ['chunker', 'crawler', 'hopper'] as const;
+export type Enemy = (typeof ENEMIES)[number];
+export type Force = Partial<Record<Enemy, number>>;
+
+export const enemyName = (enemy: Enemy) => `${enemy.charAt(0).toUpperCase()}${enemy.slice(1)}`;
 
 export interface Territory {
 	row: number;
 	col: number;
 	occupied: boolean;
-	enemies: ('chunker' | 'crawler' | 'hopper')[];
+	enemies: Force;
 }
 
 export interface PlacedTile {

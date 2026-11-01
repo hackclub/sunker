@@ -3,7 +3,7 @@
 	import { amount, describe } from '#lib/effects.js';
 	import { MAP, rgb } from '#lib/colors.js';
 	import { CONTOUR, FOG_STRIDE, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
-	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
+	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
 	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid, unprojector } from '#lib/view.js';
 
 	let { map, territory = [], table = false, detail = [1, 1], onmine }: { map: HexMap; territory?: Territory[]; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
@@ -59,10 +59,21 @@
 	});
 	const sighted = $derived.by(() => {
 		if (!hovered || hidden(hovered.row, hovered.col)) return [];
-		const counts = new Map<string, number>();
-		for (const enemy of held.get(`${hovered.row},${hovered.col}`)?.enemies ?? []) counts.set(enemy, (counts.get(enemy) ?? 0) + 1);
-		return [...counts].map(([name, count]) => `${count}x ${name.charAt(0).toUpperCase()}${name.slice(1)}`);
+		const force = held.get(`${hovered.row},${hovered.col}`)?.enemies ?? {};
+		return ENEMIES.filter((enemy) => force[enemy]).map((enemy) => `${force[enemy]}x ${enemyName(enemy)}`);
 	});
+	const crowd = (force: Force = {}) => {
+		const left = { ...force };
+		const found: Enemy[] = [];
+		while (found.length < 4 && ENEMIES.some((enemy) => left[enemy])) {
+			for (const enemy of ENEMIES) {
+				if (!left[enemy] || found.length >= 4) continue;
+				found.push(enemy);
+				left[enemy]--;
+			}
+		}
+		return found;
+	};
 	const groups = $derived.by(() => {
 		const found = new Map<PlacedTile, Set<PlacedTile>>();
 		for (const tile of tiles) {
@@ -215,7 +226,7 @@
 					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 37 + k) * 0.5, hash(col, row, 40 + k), sprite('cactus'), y]);
 				}
 			}
-			const enemies = hidden(row, col) ? [] : (held.get(`${row},${col}`)?.enemies ?? []);
+			const enemies = hidden(row, col) ? [] : crowd(held.get(`${row},${col}`)?.enemies);
 			enemies.forEach((enemy, k) => {
 				const angle = ((k + hash(col, row, 50)) / enemies.length) * Math.PI * 2;
 				const spread = enemies.length > 1 ? 0.35 : 0;

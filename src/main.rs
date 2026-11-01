@@ -5,6 +5,7 @@ mod analytics;
 mod auth;
 mod chats;
 mod database;
+mod joel;
 mod moderation;
 mod territory;
 
@@ -59,6 +60,15 @@ async fn main() -> std::io::Result<()> {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
     let pool = web::Data::new(database::init(&url).await.map_err(std::io::Error::other)?);
 
+    let ticker = pool.clone();
+    actix_web::rt::spawn(async move {
+        let mut interval = actix_web::rt::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            joel::resolve_due(&ticker).await;
+        }
+    });
+
     HttpServer::new(move || {
         App::new()
             .app_data(pool.clone())
@@ -90,6 +100,17 @@ async fn main() -> std::io::Result<()> {
             .service(health)
             .service(map)
             .service(territory::list)
+            .service(joel::announcements)
+            .service((
+                joel::overview,
+                joel::create,
+                joel::save,
+                joel::remove,
+                joel::act,
+                joel::announce,
+                joel::unannounce,
+                joel::edit,
+            ))
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((chats::list, chats::messages, chats::create, chats::flag))
             .service((

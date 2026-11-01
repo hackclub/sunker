@@ -44,16 +44,19 @@ async fn occupy_desert(pool: &PgPool) -> anyhow::Result<()> {
             if tile["base"] != "sand" {
                 continue;
             }
-            let enemies: Vec<&str> = (0..1 + (r * 7 + c * 5) % 3)
-                .map(|k| ENEMIES[(r * 5 + c * 11 + k * 7) % 3])
-                .collect();
+            let mut enemies = serde_json::Map::new();
+            for k in 0..1 + (r * 7 + c * 5) % 3 {
+                let kind = ENEMIES[(r * 5 + c * 11 + k * 7) % 3];
+                let count = enemies.get(kind).and_then(|n| n.as_i64()).unwrap_or(0) + 1;
+                enemies.insert(kind.into(), count.into());
+            }
             sqlx::query(
-                "INSERT INTO territory (hex_row, hex_col, is_occupied, enemies) VALUES ($1, $2, true, $3)
+                "INSERT INTO territory (hex_row, hex_col, enemies) VALUES ($1, $2, $3)
                  ON CONFLICT DO NOTHING",
             )
             .bind(r as i32)
             .bind(c as i32)
-            .bind(&enemies)
+            .bind(serde_json::Value::Object(enemies))
             .execute(pool)
             .await?;
         }

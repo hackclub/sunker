@@ -4,7 +4,7 @@ use hc_helper::auth::login;
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 
-pub const PERMISSIONS: [&str; 8] = [
+pub const PERMISSIONS: [&str; 9] = [
     "analytics",
     "users",
     "ban",
@@ -13,6 +13,7 @@ pub const PERMISSIONS: [&str; 8] = [
     "moderation",
     "administration",
     "review",
+    "joel",
 ];
 
 #[derive(Clone, Copy)]
@@ -24,6 +25,7 @@ pub enum Permission {
     Chats,
     Moderation,
     Administration,
+    Joel = 8,
 }
 
 pub struct Admin {
