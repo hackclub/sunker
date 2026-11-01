@@ -1,6 +1,6 @@
 import { BASES, LIBRARY, NAMES, NOISE } from '#lib/bases.js';
 import { MAP, css, rgb, vec3 } from '#lib/colors.js';
-import { CORNERS, FRONT, WIDTH } from '#lib/map.js';
+import { CORNERS, FRONT, HEIGHT, WIDTH } from '#lib/map.js';
 import { perlin } from '#lib/noise.js';
 import mountain from '#lib/assets/images/mountain.png';
 import building1 from '#lib/assets/images/building1.png';
@@ -9,6 +9,9 @@ import house1 from '#lib/assets/images/house1.png';
 import house2 from '#lib/assets/images/house2.png';
 import tree from '#lib/assets/images/tree.png';
 import cactus from '#lib/assets/images/cactus.png';
+import chunker from '#lib/assets/images/chunker.png';
+import crawler from '#lib/assets/images/crawler.png';
+import hopper from '#lib/assets/images/hopper.png';
 
 export const STRIDE = 18;
 export const THIN = 1;
@@ -16,6 +19,7 @@ export const CONTOUR = 2;
 export const HIDDEN = 3;
 export const TREE_STRIDE = 7;
 export const RAMP_STRIDE = 10;
+export const FOG_STRIDE = 4;
 export const ROCK = 1;
 
 const SPRITES = [
@@ -25,13 +29,17 @@ const SPRITES = [
 	{ name: 'house1', src: house1, size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
 	{ name: 'house2', src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
 	{ name: 'tree', src: tree, size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
-	{ name: 'cactus', src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false }
+	{ name: 'cactus', src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false },
+	{ name: 'chunker', src: chunker, size: [128, 128], anchor: [66, 124], unit: 0.0055, flat: false },
+	{ name: 'crawler', src: crawler, size: [128, 128], anchor: [62, 112], unit: 0.0055, flat: false },
+	{ name: 'hopper', src: hopper, size: [128, 128], anchor: [66, 110], unit: 0.0055, flat: false }
 ] as const;
 export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
 const TREE = sprite('tree');
 
 const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker'];
 const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
+const hovering = (value: number) => value > 0 || value < -1.5;
 export const pack = (variants: string[]) => variants.reduce((mask, variant) => (VARIANTS.includes(variant) ? mask | flag(variant) : mask), 0);
 const FLAGS = VARIANTS.map((variant) => `const int ${variant.toUpperCase()} = ${flag(variant)};`).join('\n');
 
@@ -53,6 +61,7 @@ export interface Renderer {
 	resize(screen: Screen, plane: Plane, camera: Camera): void;
 	plant(trees: Float32Array): void;
 	pave(ramps: Float32Array): void;
+	shroud(clouds: Float32Array): void;
 	fill(data: Float32Array): void;
 	draw(time?: number): void;
 	destroy(): void;
@@ -161,6 +170,10 @@ flat in vec3 v_nodes;
 out vec4 color;
 const vec3 SEAM = ${vec3(MAP.background)};
 const vec3 HIGHLIGHT = ${vec3(MAP.highlight)};
+const vec3 HOSTILE = ${vec3(MAP.hostile)};
+const vec3 HOSTILE_BORDER = ${vec3(MAP.hostileBorder)};
+const vec3 HOSTILE_HOVER = ${vec3(MAP.hostileHover)};
+const vec3 HOSTILE_LINE = ${vec3(MAP.hostileLine)};
 const vec3 LINE = ${vec3(MAP.line)};
 const vec3 ASPHALT = ${vec3(MAP.asphalt)};
 const vec3 PAINT = ${vec3(MAP.paint)};
@@ -326,6 +339,7 @@ void main() {
 		int variants = packed / 1000;
 		g_rock = (variants & SUNKER) != 0;
 		vec3 base = (variants & FARMLAND) != 0 ? farmland(v_world) : surface(float(packed % 1000), v_world, v_local, v_top);
+		if (v_highlight < 0.0) base = mix(base, HOSTILE, 0.3);
 		int edges = int(v_edges);
 		if ((variants & MINE) != 0) base = mine(v_local, v_world.y, base, int(v_arms) & 63);
 		if ((variants & BEACH) != 0) {
@@ -340,13 +354,16 @@ void main() {
 			}
 			base = mix(base, sand, shore);
 		}
-		vec3 fill = mix(base, HIGHLIGHT, v_highlight * 0.3);
+		bool hostile = v_highlight < 0.0;
+		float focus = hostile ? step(1.5, -v_highlight) : v_highlight;
+		vec3 fill = mix(base, hostile ? HOSTILE : HIGHLIGHT, focus * 0.3);
 		vec3 rgb = v_outline.a > 0.0 ? mix(v_outline.rgb, fill, smoothstep(v_outline.a - aa, v_outline.a + aa, edge)) : fill;
 		float thin = 0.0;
 		float contour = 0.0;
+		float border = 0.0;
 		float open = 1.0;
-		float thinWidth = mix(${float(BORDERS[THIN].width)}, ${float(BORDERS[THIN].focus)}, v_highlight);
-		float contourWidth = mix(${float(BORDERS[CONTOUR].width)}, ${float(BORDERS[CONTOUR].focus)}, v_highlight);
+		float thinWidth = mix(${float(BORDERS[THIN].width)}, ${float(BORDERS[THIN].focus)}, focus);
+		float contourWidth = mix(${float(BORDERS[CONTOUR].width)}, ${float(BORDERS[CONTOUR].focus)}, focus);
 		for (int i = 0; i < 6; i++) {
 			int kind = (edges >> (2 * i)) & 3;
 			float distance = 0.8660254 - dot(v_local, NORMALS[i]);
@@ -354,10 +371,12 @@ void main() {
 			if (kind == ${THIN}) thin = max(thin, 1.0 - smoothstep(thinWidth - da, thinWidth + da, distance));
 			if ((kind & 1) == 0) open = min(open, distance);
 			if (kind == ${CONTOUR}) contour = max(contour, 1.0 - smoothstep(contourWidth - da, contourWidth + da, distance));
+			if (((int(v_arms) >> (18 + i)) & 1) == 1) border = max(border, 1.0 - smoothstep(contourWidth - da, contourWidth + da, distance));
 		}
-		vec3 line = mix(LINE, HIGHLIGHT, v_highlight);
-		rgb = mix(rgb, line, thin * mix(${float(BORDERS[THIN].alpha)}, 1.0, v_highlight));
+		vec3 line = hostile ? mix(HOSTILE_LINE, HOSTILE_HOVER, focus) : mix(LINE, HIGHLIGHT, focus);
+		rgb = mix(rgb, line, thin * mix(${float(BORDERS[THIN].alpha)}, 1.0, focus));
 		rgb = mix(rgb, line, contour);
+		rgb = mix(rgb, HOSTILE_BORDER, border);
 		rgb = paved(rgb, v_local, edges, (variants & HIGHWAY) != 0);
 		color = vec4(dither(rgb), smoothstep(0.0, fwidth(open), open));
 	} else {
@@ -533,6 +552,65 @@ ${SPRITES.map((_, k) => `		if (sprite == ${k}) color = texture(u_sprites[${k}], 
 	color = rock(v_offset, v_seed);
 }`;
 
+const FOG_VERTEX = `#version 300 es
+in vec2 a_corner;
+uniform vec4 u_box;
+uniform float u_lift;
+${PROJECT}
+out vec2 v_world;
+void main() {
+	v_world = mix(u_box.xy, u_box.zw, a_corner * 0.5 + 0.5);
+	gl_Position = project(v_world - vec2(0.0, u_lift + 0.15));
+}`;
+
+const FOG_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_world;
+uniform sampler2D u_fog;
+uniform ivec2 u_origin;
+out vec4 color;
+${NOISE}
+float puff(vec2 w) {
+	vec2 drift = u_time * vec2(0.05, 0.02);
+	return 0.5 + 0.55 * perlin(w * 0.85 + drift) + 0.25 * perlin(w * 1.9 - drift * 1.4);
+}
+float density(int row, int col) {
+	ivec2 cell = ivec2(col, row) - u_origin;
+	if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, textureSize(u_fog, 0)))) return 0.0;
+	return texelFetch(u_fog, cell, 0).r;
+}
+vec2 field(vec2 w) {
+	int row = int(floor(w.y / ${float(HEIGHT * 0.75)} + 0.5));
+	vec2 total = vec2(0.0);
+	for (int dr = -2; dr <= 2; dr++) {
+		int r = row + dr;
+		float shift = float(r & 1) * 0.5;
+		int col = int(floor(w.x / ${float(WIDTH)} - shift + 0.5));
+		for (int dc = -2; dc <= 2; dc++) {
+			float d = density(r, col + dc);
+			if (d <= 0.0) continue;
+			vec2 center = vec2(${float(WIDTH)} * (float(col + dc) + shift), ${float(HEIGHT * 0.75)} * float(r));
+			float k = 1.0 - smoothstep(0.0, 1.9, length(w - center));
+			total += vec2(d, step(1.0, d)) * k;
+		}
+	}
+	return total;
+}
+void main() {
+	vec2 mass = field(v_world);
+	if (mass.x < 0.05) discard;
+	float n = puff(v_world);
+	float lit = n - puff(v_world + vec2(0.18, 0.22));
+	float body = min(mass.x + (n - 0.5) * 0.5 - 0.32, n + mass.y * 0.9 - 0.55);
+	float aa = fwidth(body);
+	float edge = smoothstep(-aa, aa, body);
+	if (edge <= 0.0) discard;
+	float la = fwidth(lit);
+	vec3 tone = mix(${vec3(MAP.fog)}, ${vec3(MAP.fogLight)}, smoothstep(0.03 - la, 0.03 + la, lit));
+	float rim = 1.0 - smoothstep(0.1 - aa, 0.1 + aa, body);
+	color = vec4(mix(tone, ${vec3(MAP.fogShade)}, rim), edge);
+}`;
+
 function template() {
 	const vertices: number[] = [];
 	const push = ([x, y]: number[], raise: number, kind: number, along: number) => vertices.push(x, y, raise, kind, along);
@@ -574,7 +652,8 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	const program = link(gl, VERTEX, FRAGMENT);
 	const forest = link(gl, TREE_VERTEX, TREE_FRAGMENT);
 	const asphalt = link(gl, RAMP_VERTEX, RAMP_FRAGMENT);
-	if (!program || !forest || !asphalt) return null;
+	const mist = link(gl, FOG_VERTEX, FOG_FRAGMENT);
+	if (!program || !forest || !asphalt || !mist) return null;
 
 	const shape = template();
 	const vao = gl.createVertexArray();
@@ -632,6 +711,20 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_bend', 2, RAMP_STRIDE, 7, 1, asphalt);
 	attribute('i_tile', 1, RAMP_STRIDE, 9, 1, asphalt);
 	let paved = 0;
+
+	const fog = gl.createVertexArray();
+	gl.bindVertexArray(fog);
+	gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]), gl.STATIC_DRAW);
+	attribute('a_corner', 2, 2, 0, 0, mist);
+	const clouds = gl.createTexture();
+	gl.useProgram(mist);
+	gl.uniform1i(gl.getUniformLocation(mist, 'u_fog'), SPRITES.length);
+	gl.activeTexture(gl.TEXTURE0 + SPRITES.length);
+	gl.bindTexture(gl.TEXTURE_2D, clouds);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	let shrouded = 0;
 	let count = 0;
 
 	gl.useProgram(program);
@@ -663,7 +756,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	gl.clearColor(...(rgb(MAP.background) as [number, number, number]), 1);
 
 	const uniforms = (set: (uniform: (name: string) => WebGLUniformLocation | null) => void) => {
-		for (const each of [program, forest, asphalt]) {
+		for (const each of [program, forest, asphalt, mist]) {
 			gl.useProgram(each);
 			set((name) => gl.getUniformLocation(each, name));
 		}
@@ -694,6 +787,28 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 			paved = data.length / RAMP_STRIDE;
 		},
+		shroud(data) {
+			shrouded = data.length / FOG_STRIDE;
+			if (!shrouded) return;
+			const cells = Array.from({ length: shrouded }, (_, i) => {
+				const [x, y, lift, density] = data.subarray(i * FOG_STRIDE, (i + 1) * FOG_STRIDE);
+				const row = Math.round(y / (HEIGHT * 0.75));
+				return { x, y, lift, density, row, col: Math.round(x / WIDTH - (row & 1) / 2) };
+			});
+			const [top, left] = [Math.min(...cells.map((c) => c.row)), Math.min(...cells.map((c) => c.col))];
+			const [rows, cols] = [Math.max(...cells.map((c) => c.row)) - top + 1, Math.max(...cells.map((c) => c.col)) - left + 1];
+			const bytes = new Uint8Array(rows * cols);
+			for (const { row, col, density } of cells) bytes[(row - top) * cols + col - left] = Math.round(density * 255);
+			gl.useProgram(mist);
+			gl.activeTexture(gl.TEXTURE0 + SPRITES.length);
+			gl.bindTexture(gl.TEXTURE_2D, clouds);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, cols, rows, 0, gl.RED, gl.UNSIGNED_BYTE, bytes);
+			gl.uniform2i(gl.getUniformLocation(mist, 'u_origin'), left, top);
+			const [xs, ys] = [cells.map((c) => c.x), cells.map((c) => c.y)];
+			gl.uniform4f(gl.getUniformLocation(mist, 'u_box'), Math.min(...xs) - 2, Math.min(...ys) - 2, Math.max(...xs) + 2, Math.max(...ys) + 2);
+			gl.uniform1f(gl.getUniformLocation(mist, 'u_lift'), cells.reduce((sum, c) => sum + c.lift, 0) / shrouded);
+		},
 		fill(data) {
 			gl.bindBuffer(gl.ARRAY_BUFFER, instances);
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
@@ -716,15 +831,23 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 				gl.uniform1f(paint, 1);
 				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, paved);
 			}
-			if (!planted) return;
-			gl.useProgram(forest);
-			gl.uniform1f(gl.getUniformLocation(forest, 'u_time'), time);
-			gl.bindVertexArray(grove);
-			const shadow = gl.getUniformLocation(forest, 'u_shadow');
-			for (const pass of [1, 0]) {
-				gl.uniform1f(shadow, pass);
-				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, planted);
+			if (planted) {
+				gl.useProgram(forest);
+				gl.uniform1f(gl.getUniformLocation(forest, 'u_time'), time);
+				gl.bindVertexArray(grove);
+				const shadow = gl.getUniformLocation(forest, 'u_shadow');
+				for (const pass of [1, 0]) {
+					gl.uniform1f(shadow, pass);
+					gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, planted);
+				}
 			}
+			if (!shrouded) return;
+			gl.disable(gl.DEPTH_TEST);
+			gl.useProgram(mist);
+			gl.uniform1f(gl.getUniformLocation(mist, 'u_time'), time);
+			gl.bindVertexArray(fog);
+			gl.drawArrays(gl.TRIANGLES, 0, 6);
+			gl.enable(gl.DEPTH_TEST);
 		},
 		destroy() {
 			gl.getExtension('WEBGL_lose_context')?.loseContext();
@@ -752,6 +875,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	let reach = 0;
 	let planted: Float32Array = new Float32Array();
 	let paved: Float32Array = new Float32Array();
+	let shrouded: Float32Array = new Float32Array();
 	let source: Float32Array | undefined;
 	let last: Float32Array | undefined;
 	const sprites = SPRITES.map(({ src }) => {
@@ -910,7 +1034,8 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			}
 		}
 		const variants = Math.floor(data[o + 14] / 1000);
-		const focus = highlight && data[o + 13] > 0;
+		const focus = highlight && hovering(data[o + 13]);
+		const hostile = data[o + 13] < 0;
 		path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
 		context.fillStyle = color(data, o + 3);
 		context.fill();
@@ -929,6 +1054,10 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				context.stroke();
 			}
 			context.restore();
+		}
+		if (hostile) {
+			context.fillStyle = css(MAP.hostile, 0.3);
+			context.fill();
 		}
 		if (variants & flag('mine')) {
 			mine(cx, cy - lift, [...data.subarray(o + 3, o + 6)].map((c) => c * 255), data[o + 17] & 63);
@@ -951,7 +1080,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.restore();
 		}
 		if (focus) {
-			context.fillStyle = css(MAP.highlight, data[o + 13] * 0.3);
+			context.fillStyle = css(hostile ? MAP.hostile : MAP.highlight, 0.3);
 			context.fill();
 		}
 		context.save();
@@ -970,8 +1099,18 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.beginPath();
 			context.moveTo(...project(cx + a[0], cy + a[1] - lift));
 			context.lineTo(...project(cx + b[0], cy + b[1] - lift));
-			context.strokeStyle = focus ? css(MAP.highlight) : css(MAP.line, border.alpha);
+			context.strokeStyle = focus ? css(hostile ? MAP.hostileHover : MAP.highlight) : css(hostile ? MAP.hostileLine : MAP.line, border.alpha);
 			context.lineWidth = (focus ? border.focus : border.width) * 2 * scale;
+			context.stroke();
+		}
+		for (let i = 0; i < 6; i++) {
+			if (((data[o + 17] >> (18 + i)) & 1) === 0) continue;
+			const [a, b] = [CORNERS[i], CORNERS[(i + 1) % 6]];
+			context.beginPath();
+			context.moveTo(...project(cx + a[0], cy + a[1] - lift));
+			context.lineTo(...project(cx + b[0], cy + b[1] - lift));
+			context.strokeStyle = css(MAP.hostileBorder);
+			context.lineWidth = BORDERS[CONTOUR].width * 2 * scale;
 			context.stroke();
 		}
 		context.restore();
@@ -1021,6 +1160,25 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				});
 			path([...side(1), ...side(-1).toReversed()]);
 			context.fill();
+		}
+	};
+
+	const clouds = () => {
+		for (let i = 0; i < shrouded.length; i += FOG_STRIDE) {
+			const [x, y, lift, density] = shrouded.subarray(i, i + FOG_STRIDE);
+			const [cx, cy] = project(x, y - lift - 0.15);
+			const radius = project(x + 1.4, y - lift - 0.15)[0] - cx;
+			const squash = (project(x, y - lift + 1.25)[1] - cy) / radius;
+			context.save();
+			context.translate(cx, cy);
+			context.scale(1, squash);
+			for (const [tone, size] of [[MAP.fogShade, 1], [MAP.fog, 0.85], [MAP.fogLight, 0.5]] as const) {
+				context.fillStyle = css(tone, density);
+				context.beginPath();
+				context.arc(0, 0, radius * size, 0, Math.PI * 2);
+				context.fill();
+			}
+			context.restore();
 		}
 	};
 
@@ -1105,6 +1263,10 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			paved = data;
 			stale = true;
 		},
+		shroud(data) {
+			shrouded = data;
+			stale = true;
+		},
 		fill(data) {
 			if (data !== source) {
 				source = data;
@@ -1125,7 +1287,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			const data = last;
 			const count = data.length / STRIDE;
 			const lit = [];
-			for (let i = 0; i < count; i++) if (data[i * STRIDE + 13] > 0) lit.push(i);
+			for (let i = 0; i < count; i++) if (hovering(data[i * STRIDE + 13])) lit.push(i);
 			if (stale) {
 				context.fillStyle = css(MAP.background);
 				context.fillRect(0, 0, canvas.width, canvas.height);
@@ -1136,6 +1298,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				}
 				ramps();
 				forest();
+				clouds();
 				cache.getContext('2d')!.drawImage(canvas, 0, 0);
 				stale = false;
 			}
@@ -1154,6 +1317,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 					if (Math.abs(data[o] - x) < WIDTH) hex(data, j, true);
 				}
 				forest();
+				clouds();
 				context.restore();
 			}
 		},

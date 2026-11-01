@@ -6,6 +6,7 @@ mod auth;
 mod chats;
 mod database;
 mod moderation;
+mod territory;
 
 use actix_files::{Files, NamedFile};
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, fn_service};
@@ -88,6 +89,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Compress::default())
             .service(health)
             .service(map)
+            .service(territory::list)
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((chats::list, chats::messages, chats::create, chats::flag))
             .service((

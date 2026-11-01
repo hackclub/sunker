@@ -2,11 +2,11 @@
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
 	import { MAP, rgb } from '#lib/colors.js';
-	import { CONTOUR, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
-	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile } from '#lib/map.js';
+	import { CONTOUR, FOG_STRIDE, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
+	import { CORNERS, WIDTH, center, neighbours, place, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
 	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid, unprojector } from '#lib/view.js';
 
-	let { map, table = false, detail = [1, 1], onmine }: { map: HexMap; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
+	let { map, territory = [], table = false, detail = [1, 1], onmine }: { map: HexMap; territory?: Territory[]; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
 
 	const LEVEL = 0.1;
 	const GRID = [...rgb(MAP.background), 0.03];
@@ -34,6 +34,35 @@
 	const reach = $derived(Math.max(...tiles.map((t) => t.tile.height)) * LIFT);
 
 	const placed = $derived(new Map(tiles.map((t) => [`${t.row},${t.col}`, t])));
+	const held = $derived(new Map(territory.map((t) => [`${t.row},${t.col}`, t])));
+	const occupied = (tile?: PlacedTile) => Boolean(tile && held.get(`${tile.row},${tile.col}`)?.occupied);
+	const fog = $derived.by(() => {
+		const rings = new Map<string, number>();
+		const queue = tiles.filter((tile) => occupied(tile) && neighbours(tile.row, tile.col).some(([r, c]) => placed.has(`${r},${c}`) && !occupied(placed.get(`${r},${c}`))));
+		for (const tile of queue) rings.set(`${tile.row},${tile.col}`, 0);
+		for (const tile of queue) {
+			for (const [r, c] of neighbours(tile.row, tile.col)) {
+				const other = placed.get(`${r},${c}`);
+				if (!occupied(other) || rings.has(`${r},${c}`)) continue;
+				rings.set(`${r},${c}`, rings.get(`${tile.row},${tile.col}`)! + 1);
+				queue.push(other!);
+			}
+		}
+		return rings;
+	});
+	const hidden = (row: number, col: number) => (fog.get(`${row},${col}`) ?? 0) > 1;
+	const clouds = $derived.by(() => {
+		const found = tiles.filter(({ row, col }) => fog.get(`${row},${col}`));
+		const data = new Float32Array(found.length * FOG_STRIDE);
+		found.forEach(({ tile, row, col, x, y }, i) => data.set([x, y, tile.height * LIFT, hidden(row, col) ? 1 : 0.55], i * FOG_STRIDE));
+		return data;
+	});
+	const sighted = $derived.by(() => {
+		if (!hovered || hidden(hovered.row, hovered.col)) return [];
+		const counts = new Map<string, number>();
+		for (const enemy of held.get(`${hovered.row},${hovered.col}`)?.enemies ?? []) counts.set(enemy, (counts.get(enemy) ?? 0) + 1);
+		return [...counts].map(([name, count]) => `${count}x ${name.charAt(0).toUpperCase()}${name.slice(1)}`);
+	});
 	const groups = $derived.by(() => {
 		const found = new Map<PlacedTile, Set<PlacedTile>>();
 		for (const tile of tiles) {
@@ -50,18 +79,21 @@
 		return found;
 	});
 
-	function edges({ tile, row, col }: PlacedTile) {
+	function edges(hex: PlacedTile) {
+		const { tile, row, col } = hex;
 		const mine = tile.variants.includes('mine');
 		return neighbours(row, col).reduce((bits, [r, c], i) => {
 			const other = placed.get(`${r},${c}`);
 			const step = other ? tile.height - other.tile.height : Infinity;
 			const across = mine !== Boolean(other?.tile.variants.includes('mine'));
-			const kind = step > LEVEL || (mine && across) ? CONTOUR : Math.abs(step) > LEVEL ? 0 : mine || across ? HIDDEN : THIN;
+			const front = occupied(hex) !== occupied(other);
+			const kind = step > LEVEL || (mine && across) ? CONTOUR : Math.abs(step) > LEVEL ? 0 : mine || across || front ? HIDDEN : THIN;
 			return bits | (kind << (2 * i));
 		}, 0);
 	}
 
-	function roads({ tile, row, col }: PlacedTile) {
+	function roads(hex: PlacedTile) {
+		const { tile, row, col } = hex;
 		const around = neighbours(row, col).map(([r, c]) => placed.get(`${r},${c}`));
 		const arms = (match: (other: PlacedTile) => boolean, shift: number) => around.reduce((bits, other, i) => (other && match(other) ? bits | (1 << (shift + i)) : bits), 0);
 		const road = roadOf(tile);
@@ -69,6 +101,7 @@
 		if (tile.variants.includes('mine')) bits |= arms((other) => other.tile.variants.includes('mine'), 0);
 		if (tile.variants.includes('beach')) bits |= arms((other) => other.tile.base !== tile.base, 6);
 		if (road === 'highway') bits |= arms((other) => roadOf(other.tile) === 'highway', 12);
+		if (occupied(hex)) bits |= around.reduce((mask, other, i) => (occupied(other) ? mask : mask | (1 << (18 + i))), 0);
 		const links = road ? arms((other) => roadOf(other.tile) !== '' && !(road === 'highway' && roadOf(other.tile) === 'highway'), 18) : 0;
 		return [bits, links];
 	}
@@ -182,6 +215,12 @@
 					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 37 + k) * 0.5, hash(col, row, 40 + k), sprite('cactus'), y]);
 				}
 			}
+			const enemies = hidden(row, col) ? [] : (held.get(`${row},${col}`)?.enemies ?? []);
+			enemies.forEach((enemy, k) => {
+				const angle = ((k + hash(col, row, 50)) / enemies.length) * Math.PI * 2;
+				const spread = enemies.length > 1 ? 0.35 : 0;
+				found.push([x + Math.cos(angle) * spread, y + Math.sin(angle) * spread * 0.6, tile.height * LIFT, 0.9 + hash(col, row, 51 + k) * 0.3, 0, sprite(enemy), y]);
+			});
 			const kinds = tile.variants.includes('buildings') ? [sprite('building1'), sprite('building2')] : tile.variants.includes('houses') ? [sprite('house1'), sprite('house2')] : null;
 			if (kinds) {
 				const count = 2 + Math.floor(hash(col, row, 13) * 2);
@@ -365,6 +404,7 @@
 			{ perspective: PERSPECTIVE, tilt: TILT }
 		);
 		gl.plant(trees);
+		gl.shroud(clouds);
 		gl.pave(ramps);
 
 		let frame = 0;
@@ -375,7 +415,9 @@
 			if (drawn !== hovered) {
 				drawn = hovered;
 				hexes.forEach((hex, i) => {
-					if (hex.placed) data[i * STRIDE + 13] = hovered === hex.placed || (hovered && groups.get(hovered)?.has(hex.placed)) ? 1 : 0;
+					if (!hex.placed) return;
+					const focus = hovered === hex.placed || Boolean(hovered && groups.get(hovered)?.has(hex.placed));
+					data[i * STRIDE + 13] = occupied(hex.placed) ? (focus ? -2 : -1) : focus ? 1 : 0;
 				});
 				gl.fill(data);
 			}
@@ -400,6 +442,13 @@
 							<span>{effect.name}</span>
 							{#if effect.value !== undefined}<span>{amount(effect.value)}</span>{/if}
 						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if sighted.length}
+				<ul>
+					{#each sighted as enemy}
+						<li>{enemy}</li>
 					{/each}
 				</ul>
 			{/if}

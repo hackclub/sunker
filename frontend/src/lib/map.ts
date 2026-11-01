@@ -11,6 +11,13 @@ export interface HexMap {
 	rows: (Tile | null)[][];
 }
 
+export interface Territory {
+	row: number;
+	col: number;
+	occupied: boolean;
+	enemies: ('chunker' | 'crawler' | 'hopper')[];
+}
+
 export interface PlacedTile {
 	tile: Required<Tile>;
 	row: number;

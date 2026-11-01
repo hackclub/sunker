@@ -23,6 +23,13 @@ export const PALETTE = {
 export const MAP = {
 	background: PALETTE.background,
 	highlight: PALETTE.accent,
+	hostile: '#d42c2c',
+	hostileBorder: PALETTE.negative,
+	hostileHover: '#ff8f8f',
+	hostileLine: '#ffd6cc',
+	fog: '#f2b5ad',
+	fogShade: '#d8857d',
+	fogLight: '#fbe0db',
 	line: '#fff8e4',
 	asphalt: '#484656',
 	paint: '#ffde70',

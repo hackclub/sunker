@@ -6,6 +6,8 @@ const GUILDS: [(&str, &str); 3] = [
     ("guild-c", "Guild C"),
 ];
 
+const ENEMIES: [&str; 3] = ["chunker", "crawler", "hopper"];
+
 pub async fn init(url: &str) -> anyhow::Result<PgPool> {
     if !Postgres::database_exists(url).await? {
         Postgres::create_database(url).await?;
@@ -16,7 +18,7 @@ pub async fn init(url: &str) -> anyhow::Result<PgPool> {
     Ok(pool)
 }
 
-async fn seed(pool: &PgPool) -> sqlx::Result<()> {
+async fn seed(pool: &PgPool) -> anyhow::Result<()> {
     for (slug, name) in GUILDS {
         sqlx::query("INSERT INTO guild (slug, name) VALUES ($1, $2) ON CONFLICT (slug) DO NOTHING")
             .bind(slug)
@@ -32,5 +34,29 @@ async fn seed(pool: &PgPool) -> sqlx::Result<()> {
     )
     .execute(pool)
     .await?;
+    occupy_desert(pool).await
+}
+
+async fn occupy_desert(pool: &PgPool) -> anyhow::Result<()> {
+    let map: serde_json::Value = serde_json::from_slice(&std::fs::read(crate::MAP_FILE)?)?;
+    for (r, row) in map["rows"].as_array().into_iter().flatten().enumerate().skip(6).take(5) {
+        for (c, tile) in row.as_array().into_iter().flatten().enumerate().skip(39) {
+            if tile["base"] != "sand" {
+                continue;
+            }
+            let enemies: Vec<&str> = (0..1 + (r * 7 + c * 5) % 3)
+                .map(|k| ENEMIES[(r * 5 + c * 11 + k * 7) % 3])
+                .collect();
+            sqlx::query(
+                "INSERT INTO territory (hex_row, hex_col, is_occupied, enemies) VALUES ($1, $2, true, $3)
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(r as i32)
+            .bind(c as i32)
+            .bind(&enemies)
+            .execute(pool)
+            .await?;
+        }
+    }
     Ok(())
 }

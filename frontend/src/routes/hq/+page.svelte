@@ -401,7 +401,7 @@
 	{/each}
 
 	<div class="flight" class:open={wanted} style:transform={wanted ? null : pose} style:--clip={wanted ? null : clip} bind:this={flight}>
-		<WorldMap map={data.map} table={!wanted} {detail} onmine={dig} />
+		<WorldMap map={data.map} territory={data.territory} table={!wanted} {detail} onmine={dig} />
 		{#if wanted}
 			<button class="back" aria-label="Back to HQ" onclick={close}>
 				<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
