@@ -2,13 +2,33 @@
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
 	import { MAP, legible, rgb } from '#lib/colors.js';
-	import { CONTOUR, FOG_STRIDE, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
+	import { CONTOUR, FOG_STRIDE, HIDDEN, MARK, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
 	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
 	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, aim, confine, frame, grid, middle, projector, unprojector, type Plane } from '#lib/view.js';
 	import { untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 
-	let { map, territory = [], table = false, detail = [1, 1], onmine }: { map: HexMap; territory?: Territory[]; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
+	let {
+		map,
+		territory = [],
+		table = false,
+		detail = [1, 1],
+		selectable = null,
+		selected = null,
+		route = null,
+		onmine,
+		onpick
+	}: {
+		map: HexMap;
+		territory?: Territory[];
+		table?: boolean;
+		detail?: [number, number];
+		selectable?: [number, number][] | null;
+		selected?: [number, number] | null;
+		route?: [number, number][] | null;
+		onmine?: () => void;
+		onpick?: (hex: [number, number]) => void;
+	} = $props();
 
 	const LEVEL = 0.1;
 	const GRID = [...rgb(MAP.background), 0.03];
@@ -32,7 +52,8 @@
 	let region = $state<string | null>(null);
 	let pointer = $state({ x: 0, y: 0 });
 	let cardHeight = $state(0);
-	const card = $derived(hovered && describe(hovered.tile));
+	const choosable = $derived(new Set((selectable ?? []).map(([row, col]) => `${row},${col}`)));
+	const pickable = (tile: PlacedTile | null) => Boolean(tile && choosable.has(`${tile.row},${tile.col}`));
 
 	const tiles = $derived(place(map));
 	const ceiling = $derived(Math.min(...tiles.map((t) => t.tile.height)) * BACKGROUND);
@@ -122,6 +143,43 @@
 		});
 	});
 
+	const course = $derived.by(() => {
+		const spots = (route ?? []).flatMap(([row, col]) => placed.get(`${row},${col}`) ?? []);
+		if (spots.length < 2) return null;
+		const paved = spots.map(({ tile }) => Boolean(roadOf(tile)));
+		const points = spots.map((spot, i) => {
+			const [x, y] = paved[i] ? junction(spot) : [spot.x, spot.y];
+			return [x, y - spot.tile.height * LIFT];
+		});
+		const [a, b] = points.slice(-2);
+		points[points.length - 1] = [a[0] + (b[0] - a[0]) * 0.45, a[1] + (b[1] - a[1]) * 0.45];
+		return { paved, points };
+	});
+
+	const trail = $derived.by(() => {
+		if (!course || !innerWidth || !innerHeight) return null;
+		const { paved, points } = course;
+		const project = projector(plane, innerWidth, innerHeight);
+		const screen = points.map(([x, y]) => project(x, y));
+		const at = (i: number) => screen[Math.max(0, Math.min(screen.length - 1, i))];
+		const straight = (i: number) => paved[i] && paved[i + 1];
+		const heading = (i: number) => {
+			const [from, to] = i > 0 && straight(i - 1) ? [at(i - 1), at(i)] : straight(i) ? [at(i), at(i + 1)] : [at(i - 1), at(i + 1)];
+			const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
+			return [(to[0] - from[0]) / length, (to[1] - from[1]) / length];
+		};
+		const segments = screen.slice(1).map(([x, y], i) => {
+			if (straight(i)) return `L${x.toFixed(1)} ${y.toFixed(1)}`;
+			const from = at(i);
+			const reach = Math.hypot(x - from[0], y - from[1]) / 3;
+			const [start, end] = [heading(i), heading(i + 1)];
+			return `C${[from[0] + start[0] * reach, from[1] + start[1] * reach, x - end[0] * reach, y - end[1] * reach, x, y].map((v) => v.toFixed(1)).join(' ')}`;
+		});
+		const [ox, oy] = project(points[0][0], points[0][1]);
+		const [ux, uy] = project(points[0][0] + 1, points[0][1]);
+		return { d: `M${screen[0].map((v) => v.toFixed(1)).join(' ')}${segments.join('')}`, width: Math.hypot(ux - ox, uy - oy) * 0.1 };
+	});
+
 	function curve(points: number[][]) {
 		const sums = [0, 0, 0, 0, 0];
 		const right = [0, 0, 0];
@@ -160,6 +218,7 @@
 		return rings;
 	});
 	const hidden = (row: number, col: number) => (fog.get(`${row},${col}`) ?? 0) > 1;
+	const card = $derived(hovered && (fog.get(`${hovered.row},${hovered.col}`) ? { title: 'Fog of War', effects: [] } : describe(hovered.tile)));
 	const clouds = $derived.by(() => {
 		const found = tiles.filter(({ row, col }) => fog.get(`${row},${col}`));
 		const data = new Float32Array(found.length * FOG_STRIDE);
@@ -543,7 +602,11 @@
 	}
 
 	function onclick(event: MouseEvent) {
-		if (!dragged && !labelled(event) && pick(event.clientX, event.clientY)?.tile.variants.includes('mine')) onmine?.();
+		if (dragged || labelled(event)) return;
+		const tile = pick(event.clientX, event.clientY);
+		if (selectable) {
+			if (tile && pickable(tile)) onpick?.([tile.row, tile.col]);
+		} else if (tile?.tile.variants.includes('mine')) onmine?.();
 	}
 
 	$effect(() => {
@@ -638,23 +701,29 @@
 		let frame = 0;
 		let drawn: PlacedTile | string | null | undefined;
 		let shown: Plane | undefined;
+		let stamped: [Set<string>, string | null] | undefined;
 		const draw = (time: number) => {
 			frame = requestAnimationFrame(draw);
 			const target = region ?? hovered;
 			const view = plane;
-			if (!gl.animated && drawn === target && shown === view) return;
+			const marks = choosable;
+			const chosen = selected && `${selected[0]},${selected[1]}`;
+			const restamp = stamped?.[0] !== marks || stamped[1] !== chosen;
+			if (!gl.animated && drawn === target && shown === view && !restamp) return;
 			if (shown !== view) {
 				shown = view;
 				const { width, height, scale, x, y } = view;
 				gl.resize(screen, { width, height, scale, x, y }, { perspective: PERSPECTIVE, tilt: TILT });
 			}
-			if (drawn !== target) {
+			if (drawn !== target || restamp) {
 				drawn = target;
+				stamped = [marks, chosen];
 				const area = region ? members.get(region) : undefined;
 				hexes.forEach((hex, i) => {
 					if (!hex.placed) return;
 					const focus = area ? area.has(`${hex.placed.row},${hex.placed.col}`) : hovered === hex.placed || Boolean(hovered && groups.get(hovered)?.has(hex.placed));
-					data[i * STRIDE + 13] = occupied(hex.placed) ? (focus ? -2 : -1) : focus ? 1 : 0;
+					const key = `${hex.placed.row},${hex.placed.col}`;
+					data[i * STRIDE + 13] = (occupied(hex.placed) ? (focus ? -2 : -1) : focus ? 1 : 0) + (key === chosen ? 2 : marks.has(key) ? 1 : 0) * MARK;
 				});
 				gl.fill(data);
 			}
@@ -670,7 +739,7 @@
 <div
 	class="map"
 	class:table
-	class:mine={hovered?.tile.variants.includes('mine')}
+	class:mine={selectable ? pickable(hovered) : hovered?.tile.variants.includes('mine')}
 	class:grabbing
 	role="presentation"
 	bind:this={element}
@@ -685,6 +754,17 @@
 	onclick={table ? undefined : onclick}
 >
 	<canvas bind:this={canvas}></canvas>
+	{#if !table && trail}
+		<svg class="trail" width={innerWidth} height={innerHeight}>
+			<defs>
+				<marker id="trail-arrow" viewBox="0 0 10 10" refX="4" refY="5" markerWidth="3" markerHeight="3" orient="auto">
+					<path d="M1 1L9 5L1 9Z" />
+				</marker>
+			</defs>
+			<path class="edge" d={trail.d} stroke-width={trail.width * 1.8} />
+			<path d={trail.d} stroke-width={trail.width} marker-end="url(#trail-arrow)" />
+		</svg>
+	{/if}
 	{#if !table && labels.length}
 		<svg class="labels" in:fade={{ delay: flown ? FLIGHT * 0.7 : 0, duration: 600 }} out:fade={{ duration: 250 }} width={innerWidth} height={innerHeight} style:--active={MAP.line} style:--shade={MAP.background}>
 			{#each labels as label, i (label.name)}
@@ -809,6 +889,31 @@
 		inset: 0;
 		width: 100%;
 		height: 100%;
+	}
+
+	.trail {
+		position: absolute;
+		inset: 0;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.trail > path {
+		fill: none;
+		stroke: #ffffff;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.trail > path.edge {
+		stroke: #000000;
+	}
+
+	.trail marker path {
+		fill: #ffffff;
+		stroke: #000000;
+		stroke-width: 1.4;
+		stroke-linejoin: round;
 	}
 
 	.labels {

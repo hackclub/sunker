@@ -1,0 +1,17 @@
+{
+	"liberate": {
+		"name": "Liberate",
+		"description": "Drive the enemy out of this tile and take it back.",
+		"requirements": {
+			"bases": null,
+			"unsupported_bases": ["ocean"],
+			"variants": null,
+			"unsupported_variants": ["mine"],
+			"occupied": true,
+			"enemies": null,
+			"unsupported_enemies": null
+		},
+		"cost": { "granite": 12, "bauxite": 6, "kalkite": 4 },
+		"effect": "liberate"
+	}
+}

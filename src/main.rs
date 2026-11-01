@@ -8,6 +8,7 @@ mod database;
 mod joel;
 mod mines;
 mod moderation;
+mod operations;
 mod projects;
 mod territory;
 
@@ -133,6 +134,16 @@ async fn main() -> std::io::Result<()> {
                 projects::hackatime_list,
                 projects::link,
                 projects::linked,
+            ))
+            .service((
+                operations::list,
+                operations::create,
+                operations::show,
+                operations::save,
+                operations::confirm,
+                operations::draft,
+                operations::allocate,
+                operations::launch,
             ))
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((chats::list, chats::messages, chats::create, chats::flag))

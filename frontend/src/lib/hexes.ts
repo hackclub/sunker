@@ -20,6 +20,7 @@ export const HIDDEN = 3;
 export const TREE_STRIDE = 7;
 export const RAMP_STRIDE = 12;
 export const FOG_STRIDE = 4;
+export const MARK = 10;
 export const ROCK = 1;
 
 const SPRITES = [
@@ -39,6 +40,7 @@ const TREE = sprite('tree');
 
 const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker', 'origin'];
 const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
+const marked = (value: number) => Math.floor((value + 2.5) / MARK);
 const hovering = (value: number) => value > 0 || value < -1.5;
 export const pack = (variants: string[]) => variants.reduce((mask, variant) => (VARIANTS.includes(variant) ? mask | flag(variant) : mask), 0);
 const FLAGS = VARIANTS.map((variant) => `const int ${variant.toUpperCase()} = ${flag(variant)};`).join('\n');
@@ -111,6 +113,7 @@ out vec3 v_top;
 out vec3 v_side;
 out vec4 v_outline;
 out float v_highlight;
+flat out float v_mark;
 out vec2 v_world;
 flat out float v_surface;
 flat out float v_edges;
@@ -140,7 +143,8 @@ void main() {
 	v_top = top;
 	v_side = side;
 	v_outline = i_outline;
-	v_highlight = i_highlight;
+	v_mark = floor((i_highlight + 2.5) / ${float(MARK)});
+	v_highlight = i_highlight - v_mark * ${float(MARK)};
 	v_world = i_center + position;
 	v_surface = i_surface;
 	v_edges = i_edges;
@@ -162,6 +166,7 @@ in vec3 v_top;
 in vec3 v_side;
 in vec4 v_outline;
 in float v_highlight;
+flat in float v_mark;
 in vec2 v_world;
 flat in float v_surface;
 flat in float v_edges;
@@ -177,6 +182,7 @@ const vec3 HOSTILE_HOVER = ${vec3(MAP.hostileHover)};
 const vec3 HOSTILE_LINE = ${vec3(MAP.hostileLine)};
 const vec3 LINE = ${vec3(MAP.line)};
 const vec3 GOLD = ${vec3(MAP.origin)};
+const vec3 WHITE = vec3(1.0);
 const vec3 ASPHALT = ${vec3(MAP.asphalt)};
 const vec3 PAINT = ${vec3(MAP.paint)};
 const vec3 HEDGE = ${vec3(MAP.hedge)};
@@ -382,6 +388,14 @@ void main() {
 		rgb = mix(rgb, HOSTILE_BORDER, border);
 		rgb = paved(rgb, v_local, edges, (variants & HIGHWAY) != 0);
 		if ((variants & ORIGIN) != 0) rgb = mix(rgb, GOLD, 1.0 - smoothstep(contourWidth - aa, contourWidth + aa, edge));
+		if (v_mark > 1.5) rgb = mix(mix(rgb, HIGHLIGHT, 0.35), HIGHLIGHT, 1.0 - smoothstep(0.12 - aa, 0.12 + aa, edge));
+		else if (v_mark > 0.5) {
+			for (int k = 0; k < 2; k++) {
+				float r = 1.0 - fract(u_time * 0.6 + float(k) * 0.5);
+				rgb = mix(rgb, WHITE, (1.0 - smoothstep(0.025 - aa, 0.025 + aa, abs(edge - 0.8660254 * (1.0 - r)))) * r * 0.8);
+			}
+			rgb = mix(rgb, WHITE, 1.0 - smoothstep(0.1 - aa, 0.1 + aa, edge));
+		}
 		color = vec4(dither(rgb), smoothstep(0.0, fwidth(open), open));
 	} else {
 		float seam = min(min(v_along, 1.0 - v_along), v_height);
@@ -1047,8 +1061,10 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			}
 		}
 		const variants = Math.floor(data[o + 14] / 1000);
-		const focus = highlight && hovering(data[o + 13]);
-		const hostile = data[o + 13] < 0;
+		const mark = marked(data[o + 13]);
+		const value = data[o + 13] - mark * MARK;
+		const focus = highlight && hovering(value);
+		const hostile = value < 0;
 		path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
 		context.fillStyle = color(data, o + 3);
 		context.fill();
@@ -1130,6 +1146,12 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
 			context.strokeStyle = css(MAP.origin);
 			context.lineWidth = BORDERS[CONTOUR].width * 2 * scale;
+			context.stroke();
+		}
+		if (mark) {
+			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
+			context.strokeStyle = mark > 1 ? css(MAP.highlight) : '#ffffff';
+			context.lineWidth = 0.2 * scale;
 			context.stroke();
 		}
 		context.restore();
@@ -1299,14 +1321,17 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				}
 				stale = true;
 			}
-			for (let o = 13; o < data.length; o += STRIDE) last![o] = data[o];
+			for (let o = 13; o < data.length; o += STRIDE) {
+				if (marked(last![o]) !== marked(data[o])) stale = true;
+				last![o] = data[o];
+			}
 		},
 		draw() {
 			if (!last) return;
 			const data = last;
 			const count = data.length / STRIDE;
 			const lit = [];
-			for (let i = 0; i < count; i++) if (hovering(data[i * STRIDE + 13])) lit.push(i);
+			for (let i = 0; i < count; i++) if (hovering(data[i * STRIDE + 13] - marked(data[i * STRIDE + 13]) * MARK)) lit.push(i);
 			if (stale) {
 				context.fillStyle = css(MAP.background);
 				context.fillRect(0, 0, canvas.width, canvas.height);

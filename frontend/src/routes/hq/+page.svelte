@@ -24,7 +24,8 @@
 	import Propaganda from '#lib/hq/Propaganda.svelte';
 	import Help from '#lib/hq/Help.svelte';
 	import Chat from '#lib/hq/Chat.svelte';
-	import Missions from '#lib/hq/Missions.svelte';
+	import Operations from '#lib/hq/Operations.svelte';
+	import { planner } from '#lib/hq/planner.svelte.js';
 	import Profile from '#lib/hq/Profile.svelte';
 	import type { Component } from 'svelte';
 
@@ -41,7 +42,7 @@
 		],
 		right: [
 			{ label: 'Chat', icon: chatIcon, component: Chat, disabled: false, dot: false },
-			{ label: 'Missions', icon: battleIcon, component: Missions, disabled: false, dot: false },
+			{ label: 'Operations', icon: battleIcon, component: Operations, disabled: false, dot: false },
 			{ label: 'Profile', icon: profileIcon, component: Profile, disabled: false, dot: false }
 		]
 	});
@@ -176,8 +177,12 @@
 
 	function close() {
 		if (page.state.map) history.back();
-		else update({ map: null }, { replace: true, state: {} });
+		else update({ map: null, operation: null }, { replace: true, state: {} });
 	}
+
+	$effect(() => {
+		if (params().has('operation') && !wanted) update({ map: true }, { replace: true, state: {} });
+	});
 
 	async function fly(opening: boolean) {
 		if (opening) docked = false;
@@ -406,7 +411,17 @@
 	{/each}
 
 	<div class="flight" class:open={wanted} style:transform={wanted ? null : pose} style:--clip={wanted ? null : clip} bind:this={flight}>
-		<WorldMap map={data.map} territory={data.territory} table={!wanted} {detail} onmine={dig} />
+		<WorldMap
+			map={data.map}
+			territory={data.territory}
+			table={!wanted}
+			{detail}
+			selectable={planner.selectable}
+			selected={planner.selected}
+			route={planner.path}
+			onmine={dig}
+			onpick={(hex) => planner.pick?.(hex)}
+		/>
 		{#if wanted}
 			<button class="back" aria-label="Back to HQ" onclick={close}>
 				<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>

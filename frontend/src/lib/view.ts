@@ -2,6 +2,7 @@ import { CORNERS, HEIGHT, WIDTH, bounds, neighbours, center, type PlacedTile } f
 
 export const PADDING = 4;
 const EDGE = 1;
+const PAN = 0.6;
 export const OVERSCAN = 1.5;
 export const TILT = 20;
 export const PERSPECTIVE = 1200;
@@ -45,8 +46,9 @@ export function confine(plane: Plane, tiles: PlacedTile[], width: number, height
 	const [up, down] = [(cy - Math.min(...corners.map(([, py]) => py))) / zoom, (Math.max(...corners.map(([, py]) => py)) - cy) / zoom];
 	const box = bounds(tiles);
 	const slack = zoom - 1;
-	const [left, right] = [Math.max(box.left - EDGE + span, cx - slack * span), Math.min(box.left + box.width + EDGE - span, cx + slack * span)];
-	const [top, bottom] = [Math.max(box.top - EDGE + up, cy - slack * up), Math.min(box.top + box.height + EDGE - down, cy + slack * down)];
+	const [sideways, upward, downward] = [span, up, down].map((reach) => reach * PAN);
+	const [left, right] = [Math.max(box.left - EDGE + span - sideways, cx - slack * span - sideways), Math.min(box.left + box.width + EDGE - span + sideways, cx + slack * span + sideways)];
+	const [top, bottom] = [Math.max(box.top - EDGE + up - upward, cy - slack * up - upward), Math.min(box.top + box.height + EDGE - down + downward, cy + slack * down + downward)];
 	const fence = ([x, y]: Point): Point => [left > right ? cx : Math.max(left, Math.min(right, x)), top > bottom ? cy : Math.max(top, Math.min(bottom, y))];
 	const [x, y] = fence(point);
 	const near = tiles.reduce((best, t) => (Math.hypot(t.x - x, t.y - y) < Math.hypot(best.x - x, best.y - y) ? t : best));
