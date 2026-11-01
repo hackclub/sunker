@@ -1,4 +1,5 @@
 use crate::auth;
+use actix_web::web::{Bytes, BytesMut};
 use actix_web::{HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use futures_util::StreamExt;
 use hc_helper::hackatime::data::{get_hackatime_project_summaries_with_token, get_hackatime_user_with_token};
@@ -12,6 +13,7 @@ use std::sync::{LazyLock, Mutex};
 
 const CALLBACK: &str = "/hackatime/callback";
 const SCREENSHOT_LIMIT: usize = 5 * 1024 * 1024;
+const SCREENSHOT_STORE_LIMIT: usize = 256 * 1024 * 1024;
 const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 const PROJECT: &str = "jsonb_build_object(
@@ -19,7 +21,7 @@ const PROJECT: &str = "jsonb_build_object(
     'repo_url', p.repo_url, 'screenshot_url', p.screenshot_url, 'hackatime_projects', p.hackatime_projects
 )";
 
-static SCREENSHOTS: LazyLock<Mutex<HashMap<i32, (String, Vec<u8>)>>> = LazyLock::new(Default::default);
+static SCREENSHOTS: LazyLock<Mutex<HashMap<i32, (&'static str, Bytes)>>> = LazyLock::new(Default::default);
 
 fn failed(what: &str, e: impl std::fmt::Display) -> HttpResponse {
     eprintln!("{what} failed: {e}");
@@ -98,10 +100,41 @@ fn field(body: &Value, key: &str, limit: usize, label: &str) -> Result<Option<St
     }
 }
 
-async fn hackatime_names(req: &HttpRequest) -> Option<Vec<String>> {
-    let token = login::get_hackatime_token_with_handling(req)?;
-    let projects = get_hackatime_project_summaries_with_token(&token).await.ok()?;
-    Some(projects.into_iter().map(|project| project.name).collect())
+fn sniff(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, ..] => Some("image/png"),
+        [0xff, 0xd8, 0xff, ..] => Some("image/jpeg"),
+        [b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some("image/gif"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ => None,
+    }
+}
+
+async fn hackatime_token(req: &HttpRequest, pool: &PgPool, user: i32) -> sqlx::Result<Option<String>> {
+    let Some(token) = login::get_hackatime_token_with_handling(req) else {
+        return Ok(None);
+    };
+    let htme_id: Option<i64> = sqlx::query_scalar("SELECT htme_id FROM \"user\" WHERE id = $1")
+        .bind(user)
+        .fetch_one(pool)
+        .await?;
+    let Some(htme_id) = htme_id else {
+        return Ok(None);
+    };
+    Ok(match get_hackatime_user_with_token(&token).await {
+        Ok(account) if account.user_id as i64 == htme_id => Some(token),
+        _ => None,
+    })
+}
+
+async fn hackatime_names(req: &HttpRequest, pool: &PgPool, user: i32) -> sqlx::Result<Option<Vec<String>>> {
+    let Some(token) = hackatime_token(req, pool, user).await? else {
+        return Ok(None);
+    };
+    Ok(get_hackatime_project_summaries_with_token(&token)
+        .await
+        .ok()
+        .map(|projects| projects.into_iter().map(|project| project.name).collect()))
 }
 
 #[patch("/api/projects/{id:\\d+}")]
@@ -141,7 +174,7 @@ pub async fn save(req: HttpRequest, id: web::Path<i32>, body: web::Json<Value>, 
             return Ok(HttpResponse::NotFound().finish());
         }
         if let Some(hackatime) = hackatime.as_ref().filter(|names| !names.is_empty()) {
-            let Some(known) = hackatime_names(&req).await else {
+            let Some(known) = hackatime_names(&req, &pool, user).await? else {
                 return Ok(HttpResponse::BadRequest().body("Link Hackatime first"));
             };
             if let Some(unknown) = hackatime.iter().find(|name| !known.contains(name)) {
@@ -167,7 +200,7 @@ pub async fn save(req: HttpRequest, id: web::Path<i32>, body: web::Json<Value>, 
                  repo_url = CASE WHEN $4 THEN NULLIF($5, '') ELSE repo_url END,
                  hackatime_projects = coalesce($6, hackatime_projects),
                  updated_at = now()
-             WHERE id = $1",
+             WHERE id = $1 AND user_id = $7 AND deleted_at IS NULL",
         )
         .bind(*id)
         .bind(name)
@@ -175,6 +208,7 @@ pub async fn save(req: HttpRequest, id: web::Path<i32>, body: web::Json<Value>, 
         .bind(repo_url.is_some())
         .bind(repo_url)
         .bind(hackatime)
+        .bind(user)
         .execute(pool.get_ref())
         .await?;
         Ok(HttpResponse::NoContent().finish())
@@ -206,24 +240,9 @@ pub async fn remove(req: HttpRequest, id: web::Path<i32>, pool: web::Data<PgPool
 
 #[put("/api/projects/{id:\\d+}/screenshot")]
 pub async fn upload(req: HttpRequest, id: web::Path<i32>, mut payload: web::Payload, pool: web::Data<PgPool>) -> HttpResponse {
-    let kind = req
-        .headers()
-        .get("Content-Type")
-        .and_then(|kind| kind.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    if !IMAGE_TYPES.contains(&kind.as_str()) {
+    let declared = req.headers().get("Content-Type").and_then(|kind| kind.to_str().ok()).unwrap_or_default();
+    if !IMAGE_TYPES.contains(&declared) {
         return HttpResponse::UnsupportedMediaType().body("Screenshots must be PNG, JPEG, WebP or GIF");
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = payload.next().await {
-        let Ok(chunk) = chunk else {
-            return HttpResponse::BadRequest().finish();
-        };
-        if bytes.len() + chunk.len() > SCREENSHOT_LIMIT {
-            return HttpResponse::PayloadTooLarge().body("Screenshots must be under 5 MB");
-        }
-        bytes.extend_from_slice(&chunk);
     }
     let result: sqlx::Result<HttpResponse> = async {
         let Some(user) = auth::user_id(&req, &pool).await? else {
@@ -232,8 +251,28 @@ pub async fn upload(req: HttpRequest, id: web::Path<i32>, mut payload: web::Payl
         if !owned(&pool, user, *id).await? {
             return Ok(HttpResponse::NotFound().finish());
         }
+        let mut bytes = BytesMut::new();
+        while let Some(chunk) = payload.next().await {
+            let Ok(chunk) = chunk else {
+                return Ok(HttpResponse::BadRequest().finish());
+            };
+            if bytes.len() + chunk.len() > SCREENSHOT_LIMIT {
+                return Ok(HttpResponse::PayloadTooLarge().body("Screenshots must be under 5 MB"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let Some(kind) = sniff(&bytes) else {
+            return Ok(HttpResponse::UnsupportedMediaType().body("Screenshots must be PNG, JPEG, WebP or GIF"));
+        };
+        {
+            let mut screenshots = SCREENSHOTS.lock().unwrap_or_else(|e| e.into_inner());
+            let stored: usize = screenshots.iter().filter(|(key, _)| **key != *id).map(|(_, (_, bytes))| bytes.len()).sum();
+            if stored + bytes.len() > SCREENSHOT_STORE_LIMIT {
+                return Ok(HttpResponse::InsufficientStorage().body("Screenshot storage is full, try again later"));
+            }
+            screenshots.insert(*id, (kind, bytes.freeze()));
+        }
         let url = format!("/api/projects/{}/screenshot?v={}", *id, chrono::Utc::now().timestamp_millis());
-        SCREENSHOTS.lock().unwrap_or_else(|e| e.into_inner()).insert(*id, (kind, bytes));
         sqlx::query("UPDATE project SET screenshot_url = $2, updated_at = now() WHERE id = $1")
             .bind(*id)
             .bind(&url)
@@ -247,30 +286,41 @@ pub async fn upload(req: HttpRequest, id: web::Path<i32>, mut payload: web::Payl
 
 #[get("/api/projects/{id:\\d+}/screenshot")]
 pub async fn screenshot(id: web::Path<i32>) -> HttpResponse {
-    match SCREENSHOTS.lock().unwrap_or_else(|e| e.into_inner()).get(&*id) {
-        Some((kind, bytes)) => HttpResponse::Ok().content_type(kind.as_str()).body(bytes.clone()),
+    let stored = SCREENSHOTS.lock().unwrap_or_else(|e| e.into_inner()).get(&*id).cloned();
+    match stored {
+        Some((kind, bytes)) => HttpResponse::Ok()
+            .content_type(kind)
+            .insert_header(("X-Content-Type-Options", "nosniff"))
+            .body(bytes),
         None => HttpResponse::NotFound().finish(),
     }
 }
 
 #[get("/api/hackatime/projects")]
-pub async fn hackatime_list(req: HttpRequest) -> HttpResponse {
-    let Some(token) = login::get_hackatime_token_with_handling(&req) else {
-        return HttpResponse::Ok().json(json!({ "linked": false }));
-    };
-    match get_hackatime_project_summaries_with_token(&token).await {
-        Ok(projects) => HttpResponse::Ok().json(json!({
-            "linked": true,
-            "projects": projects
-                .into_iter()
-                .map(|project| json!({ "name": project.name, "seconds": project.total_duration_seconds }))
-                .collect::<Vec<_>>(),
-        })),
-        Err(e) => {
-            eprintln!("loading Hackatime projects failed: {e}");
-            HttpResponse::Ok().json(json!({ "linked": false }))
-        }
+pub async fn hackatime_list(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
+    let result: sqlx::Result<HttpResponse> = async {
+        let Some(user) = auth::user_id(&req, &pool).await? else {
+            return Ok(HttpResponse::Unauthorized().finish());
+        };
+        let Some(token) = hackatime_token(&req, &pool, user).await? else {
+            return Ok(HttpResponse::Ok().json(json!({ "linked": false })));
+        };
+        Ok(match get_hackatime_project_summaries_with_token(&token).await {
+            Ok(projects) => HttpResponse::Ok().json(json!({
+                "linked": true,
+                "projects": projects
+                    .into_iter()
+                    .map(|project| json!({ "name": project.name, "seconds": project.total_duration_seconds }))
+                    .collect::<Vec<_>>(),
+            })),
+            Err(e) => {
+                eprintln!("loading Hackatime projects failed: {e}");
+                HttpResponse::Ok().json(json!({ "linked": false }))
+            }
+        })
     }
+    .await;
+    result.unwrap_or_else(|e| failed("loading Hackatime projects", e))
 }
 
 #[get("/hackatime/login")]

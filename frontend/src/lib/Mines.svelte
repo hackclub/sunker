@@ -54,6 +54,9 @@
 				})
 			);
 			return (baked = urls.map((frames) => frames.map((url) => `url("${url}")`)).toReversed());
+		}).catch((e) => {
+			baking = undefined;
+			throw e;
 		}));
 	}
 </script>
@@ -132,7 +135,9 @@
 	let tick = $state(0);
 
 	$effect(() => {
-		bake().then((drawn) => (textures = drawn));
+		bake()
+			.then((drawn) => (textures = drawn))
+			.catch(() => {});
 	});
 
 	$effect(() => {

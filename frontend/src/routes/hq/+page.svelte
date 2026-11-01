@@ -202,7 +202,7 @@
 	});
 
 	$effect(() => {
-		const id = (window.requestIdleCallback ?? setTimeout)(() => bake());
+		const id = (window.requestIdleCallback ?? setTimeout)(() => bake().catch(() => {}));
 		return () => (window.cancelIdleCallback ?? clearTimeout)(id);
 	});
 

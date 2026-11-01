@@ -60,10 +60,12 @@
 
 	$effect(() => () => [...pending.keys()].forEach(commit));
 
+	const toggle = (name: string, on: boolean) =>
+		(project.hackatime_projects = on ? [...project.hackatime_projects.filter((other) => other !== name), name] : project.hackatime_projects.filter((other) => other !== name));
+
 	async function tick(name: string, on: boolean) {
-		const before = project.hackatime_projects;
-		project.hackatime_projects = on ? [...before, name] : before.filter((other) => other !== name);
-		if (!(await send({ hackatime_projects: project.hackatime_projects }))) project.hackatime_projects = before;
+		toggle(name, on);
+		if (!(await send({ hackatime_projects: project.hackatime_projects }))) toggle(name, !on);
 	}
 
 	async function upload(file: File | null | undefined) {

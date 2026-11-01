@@ -4,6 +4,7 @@ use actix_web::{HttpRequest, HttpResponse, get, web};
 use chrono::NaiveDate;
 use hc_helper::auth::data::{forget_auth_token, get_auth_data_with_token};
 use hc_helper::auth::login::{self, CallbackArgs, Scopes, TOKEN_COOKIE};
+use hc_helper::hackatime;
 use sqlx::PgPool;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -164,5 +165,6 @@ pub async fn logout(req: HttpRequest) -> HttpResponse {
         .append_header(("Location", "/"))
         .finish();
     let _ = response.add_removal_cookie(&Cookie::new(TOKEN_COOKIE, ""));
+    let _ = response.add_removal_cookie(&Cookie::new(hackatime::login::TOKEN_COOKIE, ""));
     response
 }
