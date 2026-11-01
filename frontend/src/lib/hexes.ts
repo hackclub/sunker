@@ -37,7 +37,7 @@ const SPRITES = [
 export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
 const TREE = sprite('tree');
 
-const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker'];
+const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker', 'origin'];
 const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
 const hovering = (value: number) => value > 0 || value < -1.5;
 export const pack = (variants: string[]) => variants.reduce((mask, variant) => (VARIANTS.includes(variant) ? mask | flag(variant) : mask), 0);
@@ -176,6 +176,7 @@ const vec3 HOSTILE_BORDER = ${vec3(MAP.hostileBorder)};
 const vec3 HOSTILE_HOVER = ${vec3(MAP.hostileHover)};
 const vec3 HOSTILE_LINE = ${vec3(MAP.hostileLine)};
 const vec3 LINE = ${vec3(MAP.line)};
+const vec3 GOLD = ${vec3(MAP.origin)};
 const vec3 ASPHALT = ${vec3(MAP.asphalt)};
 const vec3 PAINT = ${vec3(MAP.paint)};
 const vec3 HEDGE = ${vec3(MAP.hedge)};
@@ -380,6 +381,7 @@ void main() {
 		rgb = mix(rgb, line, contour);
 		rgb = mix(rgb, HOSTILE_BORDER, border);
 		rgb = paved(rgb, v_local, edges, (variants & HIGHWAY) != 0);
+		if ((variants & ORIGIN) != 0) rgb = mix(rgb, GOLD, 1.0 - smoothstep(contourWidth - aa, contourWidth + aa, edge));
 		color = vec4(dither(rgb), smoothstep(0.0, fwidth(open), open));
 	} else {
 		float seam = min(min(v_along, 1.0 - v_along), v_height);
@@ -1121,6 +1123,12 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			context.moveTo(...project(cx + a[0], cy + a[1] - lift));
 			context.lineTo(...project(cx + b[0], cy + b[1] - lift));
 			context.strokeStyle = css(MAP.hostileBorder);
+			context.lineWidth = BORDERS[CONTOUR].width * 2 * scale;
+			context.stroke();
+		}
+		if (variants & flag('origin')) {
+			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
+			context.strokeStyle = css(MAP.origin);
 			context.lineWidth = BORDERS[CONTOUR].width * 2 * scale;
 			context.stroke();
 		}

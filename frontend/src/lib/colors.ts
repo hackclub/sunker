@@ -27,6 +27,7 @@ export const MAP = {
 	hostileBorder: PALETTE.negative,
 	hostileHover: '#ff8f8f',
 	hostileLine: '#ffd6cc',
+	origin: '#e8b730',
 	fog: '#f2b5ad',
 	fogShade: '#d8857d',
 	fogLight: '#fbe0db',
