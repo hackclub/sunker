@@ -18,7 +18,7 @@ export const THIN = 1;
 export const CONTOUR = 2;
 export const HIDDEN = 3;
 export const TREE_STRIDE = 7;
-export const RAMP_STRIDE = 10;
+export const RAMP_STRIDE = 12;
 export const FOG_STRIDE = 4;
 export const ROCK = 1;
 
@@ -30,7 +30,7 @@ const SPRITES = [
 	{ name: 'house2', src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
 	{ name: 'tree', src: tree, size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
 	{ name: 'cactus', src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false },
-	{ name: 'chunker', src: chunker, size: [128, 128], anchor: [66, 124], unit: 0.0055, flat: false },
+	{ name: 'chunker', src: chunker, size: [128, 128], anchor: [66, 124], unit: 0.011, flat: false },
 	{ name: 'crawler', src: crawler, size: [128, 128], anchor: [62, 112], unit: 0.0055, flat: false },
 	{ name: 'hopper', src: hopper, size: [128, 128], anchor: [66, 110], unit: 0.0055, flat: false }
 ] as const;
@@ -79,8 +79,9 @@ vec4 project(vec2 world) {
 	vec2 screen = vec2(relative.x, relative.y * u_camera.y) / (u_screen / 2.0);
 	return vec4(screen.x, -screen.y, 0.0, w);
 }
-vec4 layer(vec4 position, float y) {
-	position.z = (1.0 - 2.0 * clamp((y - u_depth.x) / u_depth.y, 0.0, 1.0)) * 0.999 * position.w;
+const float OVERLAY = 0.0002;
+vec4 layer(vec4 position, float y, float bias) {
+	position.z = ((1.0 - 2.0 * clamp((y - u_depth.x) / u_depth.y, 0.0, 1.0)) * 0.999 - bias) * position.w;
 	return position;
 }`;
 
@@ -131,7 +132,7 @@ void main() {
 		side = v * 0.7 + vec3(0.0, 0.0, 1.0) / 255.0;
 	}
 	vec2 position = a_kind > 0.5 ? a_position * 1.005 : a_position;
-	gl_Position = layer(project(i_center + position - vec2(0.0, a_raise * lift)), i_center.y);
+	gl_Position = layer(project(i_center + position - vec2(0.0, a_raise * lift)), i_center.y, 0.0);
 	v_local = position;
 	v_kind = a_kind;
 	v_along = a_along;
@@ -302,7 +303,8 @@ vec3 paved(vec3 rgb, vec2 local, int edges, bool highway) {
 		int arms = ((highway ? int(v_arms) >> 12 : 0) | (edges >> 18)) & 63;
 		int hubs = (int(v_nodes[2]) >> 8) & 127;
 		bool own = (roads & 1) == 1;
-		float road = own ? length(local - nodes[0]) - (highway ? 0.36 : 0.2) : 1e9;
+		bool mixed = ((int(v_nodes[0]) >> 4) & 1) == 1;
+		float road = own && !mixed ? length(local - nodes[0]) - (highway ? 0.36 : 0.2) : 1e9;
 		float line = 1e9;
 		for (int i = 0; i < 6; i++) {
 			if (!own && ((roads >> (i + 1)) & 1) == 1) {
@@ -317,7 +319,7 @@ vec3 paved(vec3 rgb, vec2 local, int edges, bool highway) {
 			bool linked = ((arms >> next) & 1) == 1;
 			bool sloped = ((int(v_slopes) >> i) & 1) == 1;
 			if (!sloped && !(linked && dropped(nodes, hubs, 0, i + 1, next + 1)) && !(((arms >> previous) & 1) == 1 && dropped(nodes, hubs, 0, i + 1, previous + 1))) pave(road, line, local, nodes[0], nodes[i + 1], highways[0], highways[i + 1]);
-			if (!linked || dropped(nodes, hubs, i + 1, next + 1, 0)) continue;
+			if (mixed || !linked || dropped(nodes, hubs, i + 1, next + 1, 0)) continue;
 			if (!dropped(nodes, hubs, 0, i + 1, next + 1) && !dropped(nodes, hubs, 0, next + 1, i + 1) && inside(local, nodes[0], nodes[i + 1], nodes[next + 1])) road = min(road, -1.0);
 			pave(road, line, local, nodes[i + 1], nodes[next + 1], highways[i + 1], highways[next + 1]);
 		}
@@ -389,7 +391,11 @@ void main() {
 		vec3 top = (variants & FARMLAND) != 0 ? farmland(v_world) : surface(float(packed % 1000), v_world, v_local, v_top);
 		bool highway = (variants & HIGHWAY) != 0;
 		bool sloped = ((int(v_slopes) >> edge) & 1) == 1;
-		vec3 side = step ? (sloped ? top : paved(top, v_local, int(v_edges), highway)) : mix(SEAM, v_side, smoothstep(0.02 - aa, 0.02 + aa, seam));
+		bool hostile = v_highlight < 0.0;
+		float focus = hostile ? float(-v_highlight >= 1.5) : v_highlight;
+		vec3 line = hostile ? mix(HOSTILE_LINE, HOSTILE_HOVER, focus) : mix(LINE, HIGHLIGHT, focus);
+		vec3 face = ((int(v_edges) >> (2 * edge)) & 3) == ${THIN} ? mix(top, line, mix(${float(BORDERS[THIN].alpha)}, 1.0, focus)) : top;
+		vec3 side = step ? (sloped ? face : paved(face, v_local, int(v_edges), highway)) : mix(SEAM, v_side, smoothstep(0.02 - aa, 0.02 + aa, seam));
 		color = vec4(dither(side), 1.0);
 	}
 }`;
@@ -401,6 +407,7 @@ in vec3 i_to;
 in float i_wide;
 in vec2 i_bend;
 in float i_tile;
+in vec2 i_slope;
 ${PROJECT}
 out float v_across;
 out float v_along;
@@ -414,7 +421,7 @@ void main() {
 	if (wide >= 4) {
 		v_spot = a_corner * 0.7;
 		v_arms = vec4(i_to.xy, i_bend) - i_from.xyxy;
-		gl_Position = layer(project(i_from.xy + v_spot - vec2(0.0, i_from.z)), i_tile);
+		gl_Position = layer(project(i_from.xy + v_spot - vec2(0.0, i_from.z + dot(v_spot, i_slope))), i_tile, OVERLAY);
 		return;
 	}
 	vec2 widths = vec2((wide & 1) == 1 ? 0.36 : 0.2, (wide & 2) == 2 ? 0.36 : 0.2);
@@ -423,7 +430,7 @@ void main() {
 	vec2 along = (i_to.xy - i_from.xy) / span;
 	float reach = a_corner.x < 0.0 ? -width : span + width;
 	vec3 point = mix(i_from, i_to, reach / span);
-	gl_Position = layer(project(point.xy + vec2(-along.y, along.x) * a_corner.y * width - vec2(0.0, point.z)), i_tile);
+	gl_Position = layer(project(point.xy + vec2(-along.y, along.x) * a_corner.y * width - vec2(0.0, point.z)), i_tile, OVERLAY);
 	v_across = a_corner.y * width;
 	v_along = reach;
 	v_length = span;
@@ -495,7 +502,7 @@ void main() {
 		v_offset = offset;
 		v_uv = uv;
 	}
-	gl_Position = layer(gl_Position, i_tile);
+	gl_Position = layer(gl_Position, i_tile, OVERLAY);
 	v_seed = i_tree.y;
 	v_kind = i_tree.z;
 }`;
@@ -710,6 +717,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_wide', 1, RAMP_STRIDE, 6, 1, asphalt);
 	attribute('i_bend', 2, RAMP_STRIDE, 7, 1, asphalt);
 	attribute('i_tile', 1, RAMP_STRIDE, 9, 1, asphalt);
+	attribute('i_slope', 2, RAMP_STRIDE, 10, 1, asphalt);
 	let paved = 0;
 
 	const fog = gl.createVertexArray();
@@ -765,9 +773,12 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	return {
 		animated: true,
 		resize(screen, plane, camera) {
-			canvas.width = Math.round(screen.width * screen.ratio[0]);
-			canvas.height = Math.round(screen.height * screen.ratio[1]);
-			gl.viewport(0, 0, canvas.width, canvas.height);
+			const [width, height] = [Math.round(screen.width * screen.ratio[0]), Math.round(screen.height * screen.ratio[1])];
+			if (canvas.width !== width || canvas.height !== height) {
+				canvas.width = width;
+				canvas.height = height;
+				gl.viewport(0, 0, width, height);
+			}
 			const radians = (camera.tilt * Math.PI) / 180;
 			uniforms((uniform) => {
 				gl.uniform3f(uniform('u_view'), plane.scale, plane.x, plane.y);

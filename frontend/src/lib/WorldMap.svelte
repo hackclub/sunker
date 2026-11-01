@@ -4,7 +4,8 @@
 	import { MAP, legible, rgb } from '#lib/colors.js';
 	import { CONTOUR, FOG_STRIDE, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
 	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
-	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, frame, grid, projector, unprojector } from '#lib/view.js';
+	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, aim, confine, frame, grid, middle, projector, unprojector, type Plane } from '#lib/view.js';
+	import { untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 
 	let { map, territory = [], table = false, detail = [1, 1], onmine }: { map: HexMap; territory?: Territory[]; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
@@ -13,6 +14,9 @@
 	const GRID = [...rgb(MAP.background), 0.03];
 	const GROVE = 0.4;
 	const SCRIBE = 100;
+	const ZOOM = 4;
+	const STEP = Math.SQRT2;
+	const GLIDE = 200;
 	const ROADS = ['highway', 'street'];
 	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
@@ -21,6 +25,7 @@
 	let innerHeight = $state(0);
 	let ratio = $state(1);
 	let canvas: HTMLCanvasElement;
+	let element: HTMLDivElement;
 	let painter: Renderer | undefined;
 	let restored = $state(0);
 	let hovered = $state.raw<PlacedTile | null>(null);
@@ -32,7 +37,17 @@
 	const tiles = $derived(place(map));
 	const ceiling = $derived(Math.min(...tiles.map((t) => t.tile.height)) * BACKGROUND);
 
-	const plane = $derived(frame(tiles, innerWidth, innerHeight));
+	let zoom = $state(1);
+	let focus = $state<[number, number] | null>(null);
+	let dragged = false;
+	let grabbing = $state(false);
+	let anchor: [number, number] = [0, 0];
+	let gliding = 0;
+	let still = $state(true);
+	const touches = new Map<number, [number, number]>();
+
+	const base = $derived(frame(tiles, innerWidth, innerHeight));
+	const plane = $derived(innerWidth && innerHeight ? aim(base, zoom, focus ?? middle(base)) : base);
 	const unproject = $derived(unprojector(plane, innerWidth, innerHeight));
 	const reach = $derived(Math.max(...tiles.map((t) => t.tile.height)) * LIFT);
 
@@ -42,10 +57,8 @@
 	});
 
 	const members = $derived(new Map((map.regions ?? []).map((r) => [r.name, new Set(r.tiles.map(([row, col]) => `${row},${col}`))])));
-	const labels = $derived.by(() => {
-		if (!innerWidth || !innerHeight) return [];
-		const project = projector(plane, innerWidth, innerHeight);
-		return (map.regions ?? []).flatMap((r) => {
+	const regions = $derived(
+		(map.regions ?? []).flatMap((r) => {
 			const spots = r.tiles.flatMap(([row, col]) => placed.get(`${row},${col}`) ?? []);
 			if (!spots.length) return [];
 			const water = spots.every((t) => t.tile.base === 'ocean');
@@ -78,9 +91,6 @@
 				return [(mx + a * ux - b * uy - cx) * SCRIBE, (my + a * uy + b * ux - cy) * SCRIBE];
 			});
 			if (points[0][0] > points[24][0]) points = points.reverse();
-			const [ox, oy] = project(cx, cy - lift);
-			const [ax, ay] = project(cx + 1, cy - lift);
-			const [bx, by] = project(cx, cy + 1 - lift);
 			const counts = new Map<string, number>();
 			for (const t of spots) {
 				const ground = t.tile.variants.includes('mountain') ? MAP.rock : BASES[t.tile.base in BASES ? t.tile.base : 'plain'].flat;
@@ -94,10 +104,21 @@
 					size: size * SCRIBE,
 					ground,
 					ink: legible(ground),
-					transform: `matrix(${[ax - ox, ay - oy, bx - ox, by - oy].map((v) => (v / SCRIBE).toFixed(4)).join(' ')} ${ox.toFixed(1)} ${oy.toFixed(1)})`,
+					at: [cx, cy - lift],
 					d: 'M' + points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')
 				}
 			];
+		})
+	);
+
+	const labels = $derived.by(() => {
+		if (!innerWidth || !innerHeight) return [];
+		const project = projector(plane, innerWidth, innerHeight);
+		return regions.map((r) => {
+			const [ox, oy] = project(r.at[0], r.at[1]);
+			const [ax, ay] = project(r.at[0] + 1, r.at[1]);
+			const [bx, by] = project(r.at[0], r.at[1] + 1);
+			return { ...r, transform: `matrix(${[ax - ox, ay - oy, bx - ox, by - oy].map((v) => (v / SCRIBE).toFixed(4)).join(' ')} ${ox.toFixed(1)} ${oy.toFixed(1)})` };
 		});
 	});
 
@@ -256,7 +277,7 @@
 		const packed = tiles.map(([r, c]) => node(r, c));
 		const hubs = tiles.reduce((bits, [r, c], k) => (hub(r, c) ? bits | (1 << k) : bits), 0);
 		const roads = tiles.reduce((bits, [r, c], k) => (roadOf(placed.get(`${r},${c}`)?.tile) ? bits | (1 << k) : bits), 0);
-		return [packed[0] | (packed[1] << 8) | (packed[2] << 16), packed[3] | (packed[4] << 8) | (packed[5] << 16), packed[6] | (hubs << 8) | (roads << 15)];
+		return [packed[0] | (mixed.has(`${row},${col}`) ? 16 : 0) | (packed[1] << 8) | (packed[2] << 16), packed[3] | (packed[4] << 8) | (packed[5] << 16), packed[6] | (hubs << 8) | (roads << 15)];
 	}
 
 	function hash(x: number, y: number, k: number) {
@@ -346,6 +367,27 @@
 		return data;
 	});
 
+	const mixed = $derived.by(() => {
+		const groups = new Map<string, PlacedTile[]>();
+		for (const tile of tiles) {
+			if ((node(tile.row, tile.col) & 15) <= 8) continue;
+			const key = junction(tile).map((v) => v.toFixed(3)).join();
+			groups.set(key, [...(groups.get(key) ?? []), tile]);
+		}
+		const found = new Map<string, number>();
+		for (const group of groups.values()) {
+			const heights = group.map((t) => t.tile.height);
+			if (Math.min(...heights) === Math.max(...heights)) continue;
+			const lift = (heights.reduce((sum, h) => sum + h, 0) / heights.length) * LIFT;
+			for (const t of group) found.set(`${t.row},${t.col}`, lift);
+		}
+		return found;
+	});
+
+	function bent(a: PlacedTile, b: PlacedTile) {
+		return a.tile.height !== b.tile.height || mixed.has(`${a.row},${a.col}`) || mixed.has(`${b.row},${b.col}`);
+	}
+
 	function dropped(a: PlacedTile, b: PlacedTile, c: PlacedTile) {
 		const [p, q, r] = [a, b, c].map(junction);
 		const hubs = [a, b, c].map((t) => hub(t.row, t.col));
@@ -364,11 +406,11 @@
 	}
 
 	function slopes(tile: PlacedTile) {
-		if (roadOf(tile.tile)) return links(tile).filter(([, other]) => other.tile.height !== tile.tile.height);
+		if (roadOf(tile.tile)) return links(tile).filter(([, other]) => bent(tile, other));
 		const around = neighbours(tile.row, tile.col).map(([r, c]) => placed.get(`${r},${c}`));
 		return around.flatMap((other, i) => {
 			const next = around[(i + 1) % 6];
-			return other && next && roadOf(other.tile) && roadOf(next.tile) && other.tile.height !== next.tile.height ? [[i, other] as const] : [];
+			return other && next && roadOf(other.tile) && roadOf(next.tile) && bent(other, next) ? [[i, other] as const] : [];
 		});
 	}
 
@@ -377,38 +419,45 @@
 		for (const tile of tiles) {
 			for (const [, other] of links(tile)) {
 				const level = other.tile.height === tile.tile.height;
-				if (other.tile.height > tile.tile.height || (level && (roadOf(tile.tile) !== 'highway' || roadOf(other.tile) !== 'highway' || other.row * 1000 + other.col < tile.row * 1000 + tile.col))) continue;
+				if (mixed.has(`${tile.row},${tile.col}`) || mixed.has(`${other.row},${other.col}`) || other.tile.height > tile.tile.height || (level && (roadOf(tile.tile) !== 'highway' || roadOf(other.tile) !== 'highway' || other.row * 1000 + other.col < tile.row * 1000 + tile.col))) continue;
 				const [a, b] = [junction(tile), junction(other)];
-				found.push(...a, tile.tile.height * LIFT, ...b, other.tile.height * LIFT, (roadOf(tile.tile) === 'highway' ? 1 : 0) + (roadOf(other.tile) === 'highway' ? 2 : 0), 0, 0, Math.max(tile.y, other.y));
+				found.push(...a, tile.tile.height * LIFT, ...b, other.tile.height * LIFT, (roadOf(tile.tile) === 'highway' ? 1 : 0) + (roadOf(other.tile) === 'highway' ? 2 : 0), 0, 0, Math.max(tile.y, other.y), 0, 0);
 			}
 		}
-		const corners = new Map<string, { at: number[]; lift: number; depth: number; arms: [number[], boolean][] }>();
+		const height = (tile: PlacedTile) => mixed.get(`${tile.row},${tile.col}`) ?? tile.tile.height * LIFT;
+		const corners = new Map<string, { at: number[]; lift: number; depth: number; arms: [number[], boolean, number][] }>();
 		for (const tile of tiles) {
 			if ((node(tile.row, tile.col) & 15) <= 8) continue;
 			const at = junction(tile);
 			const key = at.map((v) => v.toFixed(3)).join();
-			const corner = corners.get(key) ?? { at, lift: tile.tile.height * LIFT, depth: tile.y, arms: [] };
+			const corner = corners.get(key) ?? { at, lift: height(tile), depth: tile.y, arms: [] };
 			corners.set(key, corner);
 			for (const [, other] of links(tile)) {
 				corner.depth = Math.max(corner.depth, tile.y, other.y);
 				const b = junction(other);
-				if (Math.hypot(b[0] - at[0], b[1] - at[1]) > 0.01) corner.arms.push([b, roadOf(tile.tile) === 'highway' && roadOf(other.tile) === 'highway']);
+				if (Math.hypot(b[0] - at[0], b[1] - at[1]) <= 0.01) continue;
+				corner.arms.push([b, roadOf(tile.tile) === 'highway' && roadOf(other.tile) === 'highway', height(other) - corner.lift]);
+				if (mixed.has(`${tile.row},${tile.col}`)) found.push(...at, corner.lift, ...b, height(other), (roadOf(tile.tile) === 'highway' ? 1 : 0) + (roadOf(other.tile) === 'highway' ? 2 : 0), 0, 0, Math.max(tile.y, other.y), 0, 0);
 			}
 		}
 		for (const { at, lift, depth, arms } of corners.values()) {
-			const angle = ([[x, y]]: [number[], boolean]) => Math.atan2(y - at[1], x - at[0]);
+			const angle = ([[x, y]]: [number[], boolean, number]) => Math.atan2(y - at[1], x - at[0]);
 			arms.sort((a, b) => angle(a) - angle(b));
 			arms.forEach((first, k) => {
 				const second = arms[(k + 1) % arms.length];
 				const gap = (angle(second) - angle(first) + Math.PI * 2) % (Math.PI * 2);
-				if (arms.length > 1 && gap < Math.PI) found.push(...at, lift, ...first[0], lift, 4 + (first[1] ? 1 : 0) + (second[1] ? 2 : 0), ...second[0], depth);
+				if (arms.length < 2 || gap >= Math.PI) return;
+				const [[ax, ay], [bx, by]] = [first[0], second[0]].map(([x, y]) => [x - at[0], y - at[1]]);
+				const det = ax * by - ay * bx;
+				const slope = Math.abs(det) < 1e-6 ? [0, 0] : [(first[2] * by - ay * second[2]) / det, (ax * second[2] - first[2] * bx) / det];
+				found.push(...at, lift, ...first[0], lift, 4 + (first[1] ? 1 : 0) + (second[1] ? 2 : 0), ...second[0], depth, ...slope);
 			});
 		}
 		return new Float32Array(found);
 	});
 
 	const field = $derived.by(() => {
-		const { rows, cols } = grid(plane, innerWidth, innerHeight, reach);
+		const { rows, cols } = grid(base, innerWidth, innerHeight, reach);
 		const hexes = [];
 		for (let row = rows[0]; row <= rows[1]; row++) {
 			for (let col = cols[0]; col <= cols[1]; col++) {
@@ -433,19 +482,100 @@
 
 	const labelled = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('text'));
 
+	function hold([px, py]: [number, number], [sx, sy]: [number, number], level: number) {
+		const next = Math.max(1, Math.min(ZOOM, level));
+		const [ux, uy] = unproject(sx, sy);
+		const [cx, cy] = middle(plane);
+		const k = zoom / next;
+		focus = confine(base, tiles, innerWidth, innerHeight, next, [px - (ux - cx) * k, py - (uy - cy) * k]);
+		zoom = next;
+	}
+
+	function glide(level: number, goal = middle(plane)) {
+		cancelAnimationFrame(gliding);
+		const [from, origin, start] = [zoom, middle(plane), performance.now()];
+		const target = Math.max(1, Math.min(ZOOM, level));
+		const step = (now: number) => {
+			const t = Math.min(1, (now - start) / GLIDE);
+			const e = 1 - (1 - t) ** 3;
+			zoom = from + (target - from) * e;
+			focus = confine(base, tiles, innerWidth, innerHeight, zoom, [origin[0] + (goal[0] - origin[0]) * e, origin[1] + (goal[1] - origin[1]) * e]);
+			if (t < 1) gliding = requestAnimationFrame(step);
+		};
+		gliding = requestAnimationFrame(step);
+	}
+
+	const centroid = (points: [number, number][]): [number, number] => [points.reduce((s, [x]) => s + x, 0) / points.length, points.reduce((s, [, y]) => s + y, 0) / points.length];
+	const spread = (points: [number, number][]) => (points.length > 1 ? Math.hypot(points[0][0] - points[1][0], points[0][1] - points[1][1]) : 1);
+
+	function onpointerdown(event: PointerEvent) {
+		if (event.button !== 0) return;
+		if (!touches.size) {
+			dragged = false;
+			anchor = [event.clientX, event.clientY];
+		}
+		touches.set(event.pointerId, [event.clientX, event.clientY]);
+	}
+
 	function onpointermove(event: PointerEvent) {
-		hovered = labelled(event) ? null : pick(event.clientX, event.clientY);
 		pointer = { x: event.clientX, y: event.clientY };
+		const last = touches.get(event.pointerId);
+		if (last) {
+			const before = [...touches.values()];
+			touches.set(event.pointerId, [event.clientX, event.clientY]);
+			const after = [...touches.values()];
+			if (!dragged && (touches.size > 1 || Math.hypot(event.clientX - anchor[0], event.clientY - anchor[1]) > 4)) {
+				dragged = grabbing = true;
+				still = false;
+				region = null;
+			}
+			if (dragged && !element.hasPointerCapture(event.pointerId) && event.buttons) element.setPointerCapture(event.pointerId);
+			cancelAnimationFrame(gliding);
+			hold(unproject(...centroid(before)), centroid(after), (zoom * spread(after)) / spread(before));
+		}
+		if (!dragged) still = true;
+		hovered = !still || labelled(event) ? null : pick(event.clientX, event.clientY);
+	}
+
+	function onpointerup(event: PointerEvent) {
+		touches.delete(event.pointerId);
+		if (!touches.size) grabbing = false;
 	}
 
 	function onclick(event: MouseEvent) {
-		if (!labelled(event) && pick(event.clientX, event.clientY)?.tile.variants.includes('mine')) onmine?.();
+		if (!dragged && !labelled(event) && pick(event.clientX, event.clientY)?.tile.variants.includes('mine')) onmine?.();
 	}
+
+	$effect(() => {
+		if (table) return;
+		const wheel = (event: WheelEvent) => {
+			event.preventDefault();
+			cancelAnimationFrame(gliding);
+			const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? innerHeight : 1;
+			const [dx, dy] = [event.deltaX * unit, event.deltaY * unit];
+			const at: [number, number] = [event.clientX, event.clientY];
+			if (event.ctrlKey) hold(unproject(...at), at, zoom * Math.exp(-Math.max(-100, Math.min(100, dy)) * 0.005));
+			else hold(unproject(at[0] + dx, at[1] + dy), at, zoom);
+			still = false;
+			hovered = region = null;
+		};
+		element.addEventListener('wheel', wheel, { passive: false });
+		return () => element.removeEventListener('wheel', wheel);
+	});
+
+	$effect(() => {
+		if (!innerWidth || !innerHeight) return;
+		const fit = base;
+		untrack(() => focus && (focus = confine(fit, tiles, innerWidth, innerHeight, zoom, focus)));
+	});
 
 	$effect(() => {
 		if (!table) return;
 		hovered = null;
 		region = null;
+		touches.clear();
+		grabbing = false;
+		untrack(() => glide(1, middle(base)));
 	});
 
 	$effect(() => {
@@ -497,25 +627,27 @@
 
 	$effect(() => {
 		restored;
-		const { width, height, scale, x, y } = plane;
+		const screen = { width: innerWidth, height: innerHeight, ratio: [ratio * detail[0], ratio * detail[1]] as [number, number] };
 		const hexes = field;
 		const data = instances;
 		const gl = (painter ??= renderer(canvas) ?? fallback(canvas));
-		gl.resize(
-			{ width: innerWidth, height: innerHeight, ratio: [ratio * detail[0], ratio * detail[1]] },
-			{ width, height, scale, x, y },
-			{ perspective: PERSPECTIVE, tilt: TILT }
-		);
 		gl.plant(trees);
 		gl.shroud(clouds);
 		gl.pave(ramps);
 
 		let frame = 0;
 		let drawn: PlacedTile | string | null | undefined;
+		let shown: Plane | undefined;
 		const draw = (time: number) => {
 			frame = requestAnimationFrame(draw);
 			const target = region ?? hovered;
-			if (!gl.animated && drawn === target) return;
+			const view = plane;
+			if (!gl.animated && drawn === target && shown === view) return;
+			if (shown !== view) {
+				shown = view;
+				const { width, height, scale, x, y } = view;
+				gl.resize(screen, { width, height, scale, x, y }, { perspective: PERSPECTIVE, tilt: TILT });
+			}
 			if (drawn !== target) {
 				drawn = target;
 				const area = region ? members.get(region) : undefined;
@@ -535,7 +667,23 @@
 
 <svelte:window bind:innerWidth bind:innerHeight />
 
-<div class="map" class:table class:mine={hovered?.tile.variants.includes('mine')} role="presentation" onpointermove={table ? undefined : onpointermove} onpointerleave={() => (hovered = null)} onclick={table ? undefined : onclick}>
+<div
+	class="map"
+	class:table
+	class:mine={hovered?.tile.variants.includes('mine')}
+	class:grabbing
+	role="presentation"
+	bind:this={element}
+	onpointerdown={table ? undefined : onpointerdown}
+	onpointermove={table ? undefined : onpointermove}
+	onpointerup={onpointerup}
+	onpointercancel={onpointerup}
+	onpointerleave={(event) => {
+		hovered = null;
+		onpointerup(event);
+	}}
+	onclick={table ? undefined : onclick}
+>
 	<canvas bind:this={canvas}></canvas>
 	{#if !table && labels.length}
 		<svg class="labels" in:fade={{ delay: flown ? FLIGHT * 0.7 : 0, duration: 600 }} out:fade={{ duration: 250 }} width={innerWidth} height={innerHeight} style:--active={MAP.line} style:--shade={MAP.background}>
@@ -550,7 +698,7 @@
 						style:--ink={label.ink}
 						style:--ground={label.ground}
 						role="presentation"
-						onpointerenter={() => (region = label.name)}
+						onpointerenter={() => (region = still ? label.name : null)}
 						onpointerleave={() => (region = null)}
 					>
 						<textPath href="#region-label-{i}" startOffset="50%" text-anchor="middle">{label.name}</textPath>
@@ -582,6 +730,16 @@
 		</div>
 	{/if}
 </div>
+{#if !table}
+	<div class="zoom" in:fade={{ delay: flown ? FLIGHT * 0.7 : 0, duration: 600 }} out:fade={{ duration: 250 }}>
+		<button aria-label="Zoom out" disabled={zoom <= 1} onclick={() => glide(STEP ** (Math.ceil(Math.log(zoom) / Math.log(STEP) - 0.01) - 1))}>
+			<svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
+		</button>
+		<button aria-label="Zoom in" disabled={zoom >= ZOOM} onclick={() => glide(STEP ** (Math.floor(Math.log(zoom) / Math.log(STEP) + 0.01) + 1))}>
+			<svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12" /></svg>
+		</button>
+	</div>
+{/if}
 
 <style>
 	.map {
@@ -591,8 +749,55 @@
 		background: var(--background);
 	}
 
+	.map:not(.table) {
+		touch-action: none;
+	}
+
 	.table {
 		pointer-events: none;
+	}
+
+	.grabbing {
+		cursor: grabbing;
+	}
+
+	.zoom {
+		position: fixed;
+		right: 16px;
+		bottom: 16px;
+		display: flex;
+		gap: 8px;
+	}
+
+	.zoom button {
+		display: grid;
+		place-items: center;
+		width: 48px;
+		height: 48px;
+		padding: 0;
+		border: 1px solid var(--island-border);
+		border-radius: 6px;
+		background: var(--island);
+		color: var(--text);
+		cursor: pointer;
+	}
+
+	.zoom button:hover:not(:disabled) {
+		background: var(--hover);
+	}
+
+	.zoom button:disabled {
+		color: var(--text-muted);
+		cursor: default;
+	}
+
+	.zoom svg {
+		width: 24px;
+		height: 24px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2.5;
+		stroke-linecap: round;
 	}
 
 	.mine {

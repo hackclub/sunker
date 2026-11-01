@@ -1,6 +1,7 @@
 import { CORNERS, HEIGHT, WIDTH, bounds, neighbours, center, type PlacedTile } from '#lib/map.js';
 
 export const PADDING = 4;
+const EDGE = 1;
 export const OVERSCAN = 1.5;
 export const TILT = 20;
 export const PERSPECTIVE = 1200;
@@ -25,6 +26,33 @@ export function frame(tiles: PlacedTile[], width: number, height: number): Plane
 		x: (width * OVERSCAN) / 2 - (box.left + box.width / 2) * scale,
 		y: (height * OVERSCAN) / 2 - (box.top + box.height / 2) * scale
 	};
+}
+
+export function middle(plane: Plane): Point {
+	return [(plane.width / 2 - plane.x) / plane.scale, (plane.height / 2 - plane.y) / plane.scale];
+}
+
+export function aim(plane: Plane, zoom: number, [x, y]: Point): Plane {
+	const scale = plane.scale * zoom;
+	return { ...plane, scale, x: plane.width / 2 - x * scale, y: plane.height / 2 - y * scale };
+}
+
+export function confine(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number, point: Point): Point {
+	const unproject = unprojector(plane, width, height);
+	const [cx, cy] = middle(plane);
+	const corners = [unproject(0, 0), unproject(width, 0), unproject(0, height), unproject(width, height)];
+	const span = Math.min(...corners.map(([px]) => Math.abs(px - cx))) / zoom;
+	const [up, down] = [(cy - Math.min(...corners.map(([, py]) => py))) / zoom, (Math.max(...corners.map(([, py]) => py)) - cy) / zoom];
+	const box = bounds(tiles);
+	const slack = zoom - 1;
+	const [left, right] = [Math.max(box.left - EDGE + span, cx - slack * span), Math.min(box.left + box.width + EDGE - span, cx + slack * span)];
+	const [top, bottom] = [Math.max(box.top - EDGE + up, cy - slack * up), Math.min(box.top + box.height + EDGE - down, cy + slack * down)];
+	const fence = ([x, y]: Point): Point => [left > right ? cx : Math.max(left, Math.min(right, x)), top > bottom ? cy : Math.max(top, Math.min(bottom, y))];
+	const [x, y] = fence(point);
+	const near = tiles.reduce((best, t) => (Math.hypot(t.x - x, t.y - y) < Math.hypot(best.x - x, best.y - y) ? t : best));
+	const reach = Math.min(span, up, down) / 2;
+	const distance = Math.hypot(x - near.x, y - near.y);
+	return distance <= reach ? [x, y] : fence([near.x + ((x - near.x) * reach) / distance, near.y + ((y - near.y) * reach) / distance]);
 }
 
 export function unprojector(plane: Plane, width: number, height: number) {
