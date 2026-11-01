@@ -47,7 +47,7 @@ export function grid(plane: Plane, width: number, height: number, reach = 0) {
 	};
 }
 
-function projector(plane: Plane, width: number, height: number) {
+export function projector(plane: Plane, width: number, height: number) {
 	const radians = (TILT * Math.PI) / 180;
 	return (x: number, y: number): Point => {
 		const rx = x * plane.scale + plane.x - plane.width / 2;

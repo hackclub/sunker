@@ -1,16 +1,18 @@
 <script lang="ts">
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
-	import { MAP, rgb } from '#lib/colors.js';
+	import { MAP, legible, rgb } from '#lib/colors.js';
 	import { CONTOUR, FOG_STRIDE, HIDDEN, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
 	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
-	import { BACKGROUND, LIFT, PERSPECTIVE, TILT, frame, grid, unprojector } from '#lib/view.js';
+	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, frame, grid, projector, unprojector } from '#lib/view.js';
+	import { fade } from 'svelte/transition';
 
 	let { map, territory = [], table = false, detail = [1, 1], onmine }: { map: HexMap; territory?: Territory[]; table?: boolean; detail?: [number, number]; onmine?: () => void } = $props();
 
 	const LEVEL = 0.1;
 	const GRID = [...rgb(MAP.background), 0.03];
 	const GROVE = 0.4;
+	const SCRIBE = 100;
 	const ROADS = ['highway', 'street'];
 	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
@@ -22,6 +24,7 @@
 	let painter: Renderer | undefined;
 	let restored = $state(0);
 	let hovered = $state.raw<PlacedTile | null>(null);
+	let region = $state<string | null>(null);
 	let pointer = $state({ x: 0, y: 0 });
 	let cardHeight = $state(0);
 	const card = $derived(hovered && describe(hovered.tile));
@@ -32,6 +35,91 @@
 	const plane = $derived(frame(tiles, innerWidth, innerHeight));
 	const unproject = $derived(unprojector(plane, innerWidth, innerHeight));
 	const reach = $derived(Math.max(...tiles.map((t) => t.tile.height)) * LIFT);
+
+	let flown = $state(false);
+	$effect(() => {
+		if (table) flown = true;
+	});
+
+	const members = $derived(new Map((map.regions ?? []).map((r) => [r.name, new Set(r.tiles.map(([row, col]) => `${row},${col}`))])));
+	const labels = $derived.by(() => {
+		if (!innerWidth || !innerHeight) return [];
+		const project = projector(plane, innerWidth, innerHeight);
+		return (map.regions ?? []).flatMap((r) => {
+			const spots = r.tiles.flatMap(([row, col]) => placed.get(`${row},${col}`) ?? []);
+			if (!spots.length) return [];
+			const water = spots.every((t) => t.tile.base === 'ocean');
+			const [mx, my] = [spots.reduce((s, t) => s + t.x, 0) / spots.length, spots.reduce((s, t) => s + t.y, 0) / spots.length];
+			const lift = (spots.reduce((s, t) => s + t.tile.height, 0) / spots.length) * LIFT;
+			const [sxx, syy, sxy] = spots.reduce(([a, b, c], t) => [a + (t.x - mx) ** 2, b + (t.y - my) ** 2, c + (t.x - mx) * (t.y - my)], [0, 0, 0]);
+			const limit = water ? 0.8 : 0.45;
+			const angle = Math.max(-limit, Math.min(limit, 0.5 * Math.atan2(2 * sxy, sxx - syy)));
+			const [ux, uy] = [Math.cos(angle), Math.sin(angle)];
+			const along = spots.map((t) => [(t.x - mx) * ux + (t.y - my) * uy, (t.y - my) * ux - (t.x - mx) * uy]);
+			const [low, high] = [Math.min(...along.map(([a]) => a)), Math.max(...along.map(([a]) => a))];
+			const fit = curve(along);
+			const span = high - low + WIDTH;
+			const em = water ? 0.8 : 0.95;
+			let size = Math.max(0.32, Math.min(0.62, 0.12 * Math.sqrt(spots.length)));
+			const width = (text: number) => r.name.length * text * em;
+			if (width(size) > span) size = Math.max(0.26, span / (r.name.length * em));
+			const half = width(size) / 2;
+			const middle = (low + high) / 2;
+			const ends = [fit(middle - half), fit(middle + half)];
+			const sag = fit(middle) - (ends[0] + ends[1]) / 2;
+			const bend = Math.sign(sag || -1) * Math.max(half * 0.12, Math.min(half * 0.3, Math.abs(sag)));
+			const offset = (ends[0] + ends[1]) / 2;
+			const tilt = Math.tan(Math.max(-limit - angle, Math.min(limit - angle, Math.atan((ends[1] - ends[0]) / (2 * half)))));
+			const [cx, cy] = [mx + middle * ux - offset * uy, my + middle * uy + offset * ux];
+			let points = Array.from({ length: 25 }, (_, i) => {
+				const k = (i - 12) / 8;
+				const a = middle + k * half;
+				const b = offset + tilt * (a - middle) + bend * (1 - k * k);
+				return [(mx + a * ux - b * uy - cx) * SCRIBE, (my + a * uy + b * ux - cy) * SCRIBE];
+			});
+			if (points[0][0] > points[24][0]) points = points.reverse();
+			const [ox, oy] = project(cx, cy - lift);
+			const [ax, ay] = project(cx + 1, cy - lift);
+			const [bx, by] = project(cx, cy + 1 - lift);
+			const counts = new Map<string, number>();
+			for (const t of spots) {
+				const ground = t.tile.variants.includes('mountain') ? MAP.rock : BASES[t.tile.base in BASES ? t.tile.base : 'plain'].flat;
+				counts.set(ground, (counts.get(ground) ?? 0) + 1);
+			}
+			const ground = [...counts].sort((p, q) => q[1] - p[1])[0][0];
+			return [
+				{
+					name: r.name,
+					water,
+					size: size * SCRIBE,
+					ground,
+					ink: legible(ground),
+					transform: `matrix(${[ax - ox, ay - oy, bx - ox, by - oy].map((v) => (v / SCRIBE).toFixed(4)).join(' ')} ${ox.toFixed(1)} ${oy.toFixed(1)})`,
+					d: 'M' + points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')
+				}
+			];
+		});
+	});
+
+	function curve(points: number[][]) {
+		const sums = [0, 0, 0, 0, 0];
+		const right = [0, 0, 0];
+		for (const [a, b] of points) {
+			for (let k = 0; k < 5; k++) sums[k] += a ** k;
+			for (let k = 0; k < 3; k++) right[k] += b * a ** k;
+		}
+		const m = [0, 1, 2].map((i) => [sums[i], sums[i + 1], sums[i + 2], right[i]]);
+		for (let i = 0; i < 3; i++) {
+			const pivot = m[i][i] || 1e-9;
+			for (let j = 0; j < 3; j++) {
+				if (j === i) continue;
+				const f = m[j][i] / pivot;
+				for (let k = i; k < 4; k++) m[j][k] -= f * m[i][k];
+			}
+		}
+		const [c0, c1, c2] = m.map((row, i) => row[3] / (row[i] || 1e-9));
+		return (a: number) => c0 + c1 * a + c2 * a * a;
+	}
 
 	const placed = $derived(new Map(tiles.map((t) => [`${t.row},${t.col}`, t])));
 	const held = $derived(new Map(territory.map((t) => [`${t.row},${t.col}`, t])));
@@ -343,17 +431,21 @@
 		return null;
 	}
 
+	const labelled = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('text'));
+
 	function onpointermove(event: PointerEvent) {
-		hovered = pick(event.clientX, event.clientY);
+		hovered = labelled(event) ? null : pick(event.clientX, event.clientY);
 		pointer = { x: event.clientX, y: event.clientY };
 	}
 
 	function onclick(event: MouseEvent) {
-		if (pick(event.clientX, event.clientY)?.tile.variants.includes('mine')) onmine?.();
+		if (!labelled(event) && pick(event.clientX, event.clientY)?.tile.variants.includes('mine')) onmine?.();
 	}
 
 	$effect(() => {
-		if (table) hovered = null;
+		if (!table) return;
+		hovered = null;
+		region = null;
 	});
 
 	$effect(() => {
@@ -419,15 +511,17 @@
 		gl.pave(ramps);
 
 		let frame = 0;
-		let drawn: PlacedTile | null | undefined;
+		let drawn: PlacedTile | string | null | undefined;
 		const draw = (time: number) => {
 			frame = requestAnimationFrame(draw);
-			if (!gl.animated && drawn === hovered) return;
-			if (drawn !== hovered) {
-				drawn = hovered;
+			const target = region ?? hovered;
+			if (!gl.animated && drawn === target) return;
+			if (drawn !== target) {
+				drawn = target;
+				const area = region ? members.get(region) : undefined;
 				hexes.forEach((hex, i) => {
 					if (!hex.placed) return;
-					const focus = hovered === hex.placed || Boolean(hovered && groups.get(hovered)?.has(hex.placed));
+					const focus = area ? area.has(`${hex.placed.row},${hex.placed.col}`) : hovered === hex.placed || Boolean(hovered && groups.get(hovered)?.has(hex.placed));
 					data[i * STRIDE + 13] = occupied(hex.placed) ? (focus ? -2 : -1) : focus ? 1 : 0;
 				});
 				gl.fill(data);
@@ -443,6 +537,28 @@
 
 <div class="map" class:table class:mine={hovered?.tile.variants.includes('mine')} role="presentation" onpointermove={table ? undefined : onpointermove} onpointerleave={() => (hovered = null)} onclick={table ? undefined : onclick}>
 	<canvas bind:this={canvas}></canvas>
+	{#if !table && labels.length}
+		<svg class="labels" in:fade={{ delay: flown ? FLIGHT * 0.7 : 0, duration: 600 }} out:fade={{ duration: 250 }} width={innerWidth} height={innerHeight} style:--active={MAP.line} style:--shade={MAP.background}>
+			{#each labels as label, i (label.name)}
+				<g transform={label.transform}>
+					<path id="region-label-{i}" d={label.d} fill="none" />
+					<text
+						class:water={label.water}
+						class:active={region === label.name}
+						font-size={label.size}
+						stroke-width={label.size * 0.2}
+						style:--ink={label.ink}
+						style:--ground={label.ground}
+						role="presentation"
+						onpointerenter={() => (region = label.name)}
+						onpointerleave={() => (region = null)}
+					>
+						<textPath href="#region-label-{i}" startOffset="50%" text-anchor="middle">{label.name}</textPath>
+					</text>
+				</g>
+			{/each}
+		</svg>
+	{/if}
 	{#if card}
 		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:left="{pointer.x}px" style:top="{pointer.y}px" bind:clientHeight={cardHeight}>
 			<h2>{card.title}</h2>
@@ -488,6 +604,39 @@
 		inset: 0;
 		width: 100%;
 		height: 100%;
+	}
+
+	.labels {
+		position: absolute;
+		inset: 0;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.labels text {
+		font-family: 'Belgrano', serif;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		fill: var(--ink);
+		stroke: var(--ground);
+		stroke-linejoin: round;
+		paint-order: stroke;
+		pointer-events: auto;
+		user-select: none;
+		transition:
+			fill 0.15s,
+			stroke 0.15s;
+	}
+
+	.labels text.water {
+		font-style: italic;
+		letter-spacing: 0.24em;
+		text-transform: none;
+	}
+
+	.labels text.active {
+		fill: var(--active);
+		stroke: var(--shade);
 	}
 
 	.card {
