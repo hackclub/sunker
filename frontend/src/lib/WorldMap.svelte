@@ -12,6 +12,7 @@
 		map,
 		territory = [],
 		table = false,
+		arrows = true,
 		detail = [1, 1],
 		selectable = null,
 		selected = null,
@@ -22,6 +23,7 @@
 		map: HexMap;
 		territory?: Territory[];
 		table?: boolean;
+		arrows?: boolean;
 		detail?: [number, number];
 		selectable?: [number, number][] | null;
 		selected?: [number, number] | null;
@@ -37,6 +39,7 @@
 	const ZOOM = 4;
 	const STEP = Math.SQRT2;
 	const GLIDE = 200;
+	const SWEEP = 0.8;
 	const ROADS = ['highway', 'street'];
 	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
@@ -105,6 +108,7 @@
 			const offset = (ends[0] + ends[1]) / 2;
 			const tilt = Math.tan(Math.max(-limit - angle, Math.min(limit - angle, Math.atan((ends[1] - ends[0]) / (2 * half)))));
 			const [cx, cy] = [mx + middle * ux - offset * uy, my + middle * uy + offset * ux];
+			const anchor = r.label && placed.get(`${r.label[0]},${r.label[1]}`);
 			let points = Array.from({ length: 25 }, (_, i) => {
 				const k = (i - 12) / 8;
 				const a = middle + k * half;
@@ -125,7 +129,7 @@
 					size: size * SCRIBE,
 					ground,
 					ink: legible(ground),
-					at: [cx, cy - lift],
+					at: anchor ? [anchor.x, anchor.y - lift] : [cx, cy - lift],
 					d: 'M' + points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')
 				}
 			];
@@ -139,8 +143,16 @@
 			const [ox, oy] = project(r.at[0], r.at[1]);
 			const [ax, ay] = project(r.at[0] + 1, r.at[1]);
 			const [bx, by] = project(r.at[0], r.at[1] + 1);
-			return { ...r, transform: `matrix(${[ax - ox, ay - oy, bx - ox, by - oy].map((v) => (v / SCRIBE).toFixed(4)).join(' ')} ${ox.toFixed(1)} ${oy.toFixed(1)})` };
+			return { ...r, transform: `matrix(${[ax - ox, ay - oy, bx - ox, by - oy].map((v) => (v / SCRIBE).toFixed(4)).join(', ')}, ${ox.toFixed(1)}, ${oy.toFixed(1)})` };
 		});
+	});
+
+	let moving = $state(false);
+	$effect(() => {
+		plane;
+		moving = true;
+		const timer = setTimeout(() => (moving = false), 200);
+		return () => clearTimeout(timer);
 	});
 
 	const course = $derived.by(() => {
@@ -218,7 +230,7 @@
 		return rings;
 	});
 	const hidden = (row: number, col: number) => (fog.get(`${row},${col}`) ?? 0) > 1;
-	const card = $derived(hovered && (fog.get(`${hovered.row},${hovered.col}`) ? { title: 'Fog of War', effects: [] } : describe(hovered.tile)));
+	const card = $derived(hovered && (hidden(hovered.row, hovered.col) ? { title: 'Blocked by fog of war', effects: [] } : describe(hovered.tile)));
 	const clouds = $derived.by(() => {
 		const found = tiles.filter(({ row, col }) => fog.get(`${row},${col}`));
 		const data = new Float32Array(found.length * FOG_STRIDE);
@@ -516,7 +528,7 @@
 	});
 
 	const field = $derived.by(() => {
-		const { rows, cols } = grid(base, innerWidth, innerHeight, reach);
+		const { rows, cols } = grid(base, innerWidth, innerHeight, reach, tiles, ZOOM);
 		const hexes = [];
 		for (let row = rows[0]; row <= rows[1]; row++) {
 			for (let col = cols[0]; col <= cols[1]; col++) {
@@ -624,6 +636,48 @@
 		};
 		element.addEventListener('wheel', wheel, { passive: false });
 		return () => element.removeEventListener('wheel', wheel);
+	});
+
+	$effect(() => {
+		if (table || !arrows) return;
+		const held = new Set<string>();
+		const tapped = new Set<string>();
+		let frame = 0;
+		let last = 0;
+		const step = (now: number) => {
+			const span = SWEEP * (held.size ? Math.max(0, Math.min(50, now - last)) : 16);
+			last = now;
+			const at: [number, number] = [innerWidth / 2, innerHeight / 2];
+			const pressed = (key: string) => Number(held.has(key) || tapped.has(key));
+			const [dx, dy] = [(pressed('ArrowRight') - pressed('ArrowLeft')) * span, (pressed('ArrowDown') - pressed('ArrowUp')) * span];
+			tapped.clear();
+			hold(unproject(at[0] + dx, at[1] + dy), at, zoom);
+			frame = held.size ? requestAnimationFrame(step) : 0;
+		};
+		const down = (event: KeyboardEvent) => {
+			const target = event.target as Node;
+			if (!event.key.startsWith('Arrow') || event.altKey || event.ctrlKey || event.metaKey || (target !== document.body && !element.contains(target))) return;
+			event.preventDefault();
+			held.add(event.key);
+			tapped.add(event.key);
+			cancelAnimationFrame(gliding);
+			still = false;
+			hovered = region = null;
+			if (frame) return;
+			last = performance.now();
+			frame = requestAnimationFrame(step);
+		};
+		const up = (event: KeyboardEvent) => held.delete(event.key);
+		const release = () => held.clear();
+		window.addEventListener('keydown', down);
+		window.addEventListener('keyup', up);
+		window.addEventListener('blur', release);
+		return () => {
+			cancelAnimationFrame(frame);
+			window.removeEventListener('keydown', down);
+			window.removeEventListener('keyup', up);
+			window.removeEventListener('blur', release);
+		};
 	});
 
 	$effect(() => {
@@ -766,9 +820,9 @@
 		</svg>
 	{/if}
 	{#if !table && labels.length}
-		<svg class="labels" in:fade={{ delay: flown ? FLIGHT * 0.7 : 0, duration: 600 }} out:fade={{ duration: 250 }} width={innerWidth} height={innerHeight} style:--active={MAP.line} style:--shade={MAP.background}>
+		<div class="labels" class:moving in:fade={{ delay: flown ? FLIGHT * 0.7 : 0, duration: 600 }} out:fade={{ duration: 250 }} style:--active={MAP.line} style:--shade={MAP.background}>
 			{#each labels as label, i (label.name)}
-				<g transform={label.transform}>
+				<svg class="label" style:transform={label.transform}>
 					<path id="region-label-{i}" d={label.d} fill="none" />
 					<text
 						class:water={label.water}
@@ -783,9 +837,9 @@
 					>
 						<textPath href="#region-label-{i}" startOffset="50%" text-anchor="middle">{label.name}</textPath>
 					</text>
-				</g>
+				</svg>
 			{/each}
-		</svg>
+		</div>
 	{/if}
 	{#if card}
 		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:left="{pointer.x}px" style:top="{pointer.y}px" bind:clientHeight={cardHeight}>
@@ -919,8 +973,21 @@
 	.labels {
 		position: absolute;
 		inset: 0;
-		overflow: visible;
 		pointer-events: none;
+	}
+
+	.label {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 1px;
+		height: 1px;
+		overflow: visible;
+		transform-origin: 0 0;
+	}
+
+	.moving .label {
+		will-change: transform;
 	}
 
 	.labels text {
@@ -935,7 +1002,12 @@
 		user-select: none;
 		transition:
 			fill 0.15s,
-			stroke 0.15s;
+			stroke 0.15s,
+			stroke-opacity 0.15s;
+	}
+
+	.labels.moving text {
+		stroke-opacity: 0;
 	}
 
 	.labels text.water {

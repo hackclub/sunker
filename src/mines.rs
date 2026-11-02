@@ -161,7 +161,7 @@ async fn log(tx: &mut Transaction<'_, Postgres>, admin: i32, action: &str, summa
 pub async fn list(pool: web::Data<PgPool>) -> HttpResponse {
     let mines: sqlx::Result<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT jsonb_build_object(
-             'contracts', (SELECT coalesce(jsonb_agg({CONTRACT} ORDER BY t.ring DESC, t.name), '[]') FROM contract t WHERE t.deleted_at IS NULL),
+             'contracts', (SELECT coalesce(jsonb_agg({CONTRACT} || jsonb_build_object('active', (SELECT count(*) FROM project p WHERE p.contract_slug = t.slug AND p.deleted_at IS NULL)) ORDER BY t.ring DESC, t.name), '[]') FROM contract t WHERE t.deleted_at IS NULL),
              'prizes', (SELECT coalesce(jsonb_agg({PRIZE} ORDER BY z.ring DESC, z.name), '[]') FROM prize z WHERE z.deleted_at IS NULL)
          )"
     )))

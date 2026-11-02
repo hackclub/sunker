@@ -56,7 +56,7 @@ export const BASES: Record<string, Base> = {
 	float aa = fwidth(blades);
 	return mix(vec3(62.0, 156.0, 72.0) / 255.0, color, smoothstep(0.018 - aa, 0.018 + aa, blades));`
 	},
-	savannah: {
+	brush: {
 		flat: '#d2bd6c',
 		glsl: `
 	float n = 0.5 * perlin(world * 0.5) + 0.3 * perlin(world * 1.2) + 0.2 * perlin(world * 2.6) + 0.12 * perlin(world * 6.0) + 0.08 * perlin(world * 14.0);

@@ -10,6 +10,7 @@ export interface Tile {
 export interface Region {
 	name: string;
 	tiles: [number, number][];
+	label?: [number, number];
 }
 
 export interface HexMap {

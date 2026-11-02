@@ -7,6 +7,7 @@ export type Contract = {
 	video_url: string | null;
 	criteria: string[];
 	resources: Record<string, number>;
+	active?: number;
 };
 
 export type Prize = { id: number; ring: number; name: string; tagline: string; description: string };

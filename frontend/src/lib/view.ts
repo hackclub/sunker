@@ -3,6 +3,8 @@ import { CORNERS, HEIGHT, WIDTH, bounds, neighbours, center, type PlacedTile } f
 export const PADDING = 4;
 const EDGE = 1;
 const PAN = 0.6;
+const ZOOMS = 16;
+const STEPS = 30;
 export const OVERSCAN = 1.5;
 export const TILT = 20;
 export const PERSPECTIVE = 1200;
@@ -38,7 +40,7 @@ export function aim(plane: Plane, zoom: number, [x, y]: Point): Plane {
 	return { ...plane, scale, x: plane.width / 2 - x * scale, y: plane.height / 2 - y * scale };
 }
 
-export function confine(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number, point: Point): Point {
+function limits(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number) {
 	const unproject = unprojector(plane, width, height);
 	const [cx, cy] = middle(plane);
 	const corners = [unproject(0, 0), unproject(width, 0), unproject(0, height), unproject(width, height)];
@@ -49,7 +51,12 @@ export function confine(plane: Plane, tiles: PlacedTile[], width: number, height
 	const [sideways, upward, downward] = [span, up, down].map((reach) => reach * PAN);
 	const [left, right] = [Math.max(box.left - EDGE + span - sideways, cx - slack * span - sideways), Math.min(box.left + box.width + EDGE - span + sideways, cx + slack * span + sideways)];
 	const [top, bottom] = [Math.max(box.top - EDGE + up - upward, cy - slack * up - upward), Math.min(box.top + box.height + EDGE - down + downward, cy + slack * down + downward)];
-	const fence = ([x, y]: Point): Point => [left > right ? cx : Math.max(left, Math.min(right, x)), top > bottom ? cy : Math.max(top, Math.min(bottom, y))];
+	return { xs: left > right ? [cx] : [left, right], ys: top > bottom ? [cy] : [top, bottom], span, up, down };
+}
+
+export function confine(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number, point: Point): Point {
+	const { xs, ys, span, up, down } = limits(plane, tiles, width, height, zoom);
+	const fence = ([x, y]: Point): Point => [Math.max(xs[0], Math.min(xs.at(-1)!, x)), Math.max(ys[0], Math.min(ys.at(-1)!, y))];
 	const [x, y] = fence(point);
 	const near = tiles.reduce((best, t) => (Math.hypot(t.x - x, t.y - y) < Math.hypot(best.x - x, best.y - y) ? t : best));
 	const reach = Math.min(span, up, down) / 2;
@@ -67,9 +74,17 @@ export function unprojector(plane: Plane, width: number, height: number) {
 	};
 }
 
-export function grid(plane: Plane, width: number, height: number, reach = 0) {
-	const unproject = unprojector(plane, width, height);
-	const corners = [unproject(0, 0), unproject(width, 0), unproject(0, height), unproject(width, height)];
+export function grid(plane: Plane, width: number, height: number, reach = 0, tiles: PlacedTile[] = [], deepest = 1) {
+	const views = [plane];
+	for (let i = 0; tiles.length && i <= ZOOMS; i++) {
+		const zoom = 1 + ((deepest - 1) * i) / ZOOMS;
+		const { xs, ys } = limits(plane, tiles, width, height, zoom);
+		for (const x of xs) for (const y of ys) views.push(aim(plane, zoom, [x, y]));
+	}
+	const corners = views.flatMap((view) => {
+		const unproject = unprojector(view, width, height);
+		return [unproject(0, 0), unproject(width, 0), unproject(0, height), unproject(width, height)];
+	});
 	const [xs, ys] = [corners.map(([x]) => x), corners.map(([, y]) => y)];
 	return {
 		rows: [Math.floor(Math.min(...ys) / (HEIGHT * 0.75)) - 1, Math.ceil((Math.max(...ys) + reach) / (HEIGHT * 0.75)) + 1],
@@ -174,12 +189,17 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 		return [x + CORNERS[i % 6][0], y + CORNERS[i % 6][1]];
 	};
 	const key = ([x, y]: number[]) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
+	const cells = [...distance].map(([cell, d]) => [...cell.split(',').map(Number), d]);
+	const layers = Array.from({ length: rings + 1 }, (): number[][] => []);
+	const border = cells.filter(([row, col]) => neighbours(row, col).some(([r, c]) => !distance.has(`${r},${c}`)));
+	for (const cell of cells) if (cell[2] <= rings) layers[cell[2]].push(cell);
 	const spread: Keyframe[] = [{ '--clip': footprint(island(tiles, width, height)), offset: 0, easing: 'step-end' }];
-	for (let k = 1; k <= rings; k++) {
+	const steps = Math.min(rings, STEPS);
+	for (let step = 1; step <= steps; step++) {
+		const k = Math.round((step * rings) / steps);
 		const edges = new Map<string, number[][]>();
-		for (const [cell, d] of distance) {
+		for (const [row, col, d] of new Set([...layers[k], ...border])) {
 			if (d > k) continue;
-			const [row, col] = cell.split(',').map(Number);
 			neighbours(row, col).forEach(([r, c], i) => {
 				if ((distance.get(`${r},${c}`) ?? Infinity) <= k) return;
 				const [from, to] = [spot(row, col, i), spot(row, col, i + 1)];
@@ -200,7 +220,7 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 				shape += path(loop);
 			}
 		}
-		spread.push({ '--clip': `path('${shape}')`, offset: 0.5 + (0.5 * k) / (rings + 1), easing: 'step-end' });
+		spread.push({ '--clip': `path('${shape}')`, offset: 0.5 + (0.5 * step) / (steps + 1), easing: 'step-end' });
 	}
 	spread.push({ '--clip': 'inset(0)', offset: 1 });
 	const grow: Keyframe[] = [

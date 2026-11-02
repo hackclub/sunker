@@ -175,6 +175,10 @@
 		else update({ mines: null, ring: null }, { replace: true, state: { map: page.state.map } });
 	}
 
+	function visit() {
+		update({ mines: null, ring: null, left: 'projects' }, { replace: true, state: { map: page.state.map } });
+	}
+
 	function close() {
 		if (page.state.map) history.back();
 		else update({ map: null, operation: null }, { replace: true, state: {} });
@@ -415,6 +419,7 @@
 			map={data.map}
 			territory={data.territory}
 			table={!wanted}
+			arrows={!mining}
 			{detail}
 			selectable={planner.selectable}
 			selected={planner.selected}
@@ -430,7 +435,7 @@
 	</div>
 
 	{#if mining}
-		<Mines onback={leave} />
+		<Mines onback={leave} onproject={visit} />
 	{/if}
 </div>
 

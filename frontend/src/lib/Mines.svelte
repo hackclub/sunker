@@ -75,7 +75,7 @@
 	import { load } from '#lib/projects.svelte.js';
 	import { params, update } from '#lib/url.svelte.js';
 
-	let { onback }: { onback: () => void } = $props();
+	let { onback, onproject }: { onback: () => void; onproject: () => void } = $props();
 
 	const SIDES = 48;
 	const RADIUS = 1;
@@ -103,7 +103,7 @@
 		[1.9, 0.62]
 	];
 	const TABS = [
-		['projects', 'Project Templates'],
+		['projects', 'Contracts'],
 		['prizes', 'Prizes']
 	] as const;
 	const RINGS = Array.from({ length: RING_COUNT }, (_, i) => RING_COUNT - 1 - i);
@@ -216,6 +216,7 @@
 		claiming = contract.slug;
 		try {
 			await request('POST', '/api/projects', { contract: contract.slug });
+			contract.active = (contract.active ?? 0) + 1;
 			failure = '';
 			load();
 		} catch (e) {
@@ -334,6 +335,7 @@
 									<img src={contract.image_url} alt="" />
 								{/if}
 								<h3>{contract.name}</h3>
+								<p class="count">{contract.active ?? 0} active</p>
 								{#if contract.description}
 									<p>{contract.description}</p>
 								{/if}
@@ -377,6 +379,11 @@
 
 	<Dialog bind:open={claimed} title={failure ? "Couldn't claim that contract" : 'Contract claimed'}>
 		<p class="claimed">{failure || 'Contract claimed and project created, check the main HQ dashboard!'}</p>
+		{#if !failure}
+			<footer>
+				<button class="button primary" onclick={onproject}>Go to project</button>
+			</footer>
+		{/if}
 	</Dialog>
 
 	<h1 class="title">The Mine of Projects</h1>
@@ -649,6 +656,15 @@
 
 	.claimed {
 		margin: 0;
+	}
+
+	.count {
+		color: var(--text-muted);
+	}
+
+	footer {
+		display: flex;
+		justify-content: flex-end;
 	}
 
 	.title {
