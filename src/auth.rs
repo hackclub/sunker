@@ -7,9 +7,11 @@ use hc_helper::auth::login::{self, CallbackArgs, Scopes, TOKEN_COOKIE};
 use hc_helper::hackatime;
 use sqlx::PgPool;
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 const CALLBACK: &str = "/callback";
+const REFERRAL_COOKIE: &str = "sunker_ref";
 
 pub fn site_url(path: &str) -> String {
     let base_url = hc_helper::keys::base_url();
@@ -37,7 +39,7 @@ pub async fn user_id(req: &HttpRequest, pool: &PgPool) -> sqlx::Result<Option<i3
         .await
 }
 
-async fn save_user(pool: &PgPool, token: &str) -> anyhow::Result<()> {
+async fn save_user(pool: &PgPool, token: &str, referral: Option<&str>) -> anyhow::Result<()> {
     let data = get_auth_data_with_token(token).await?;
     let address = data
         .primary_address()
@@ -50,13 +52,14 @@ async fn save_user(pool: &PgPool, token: &str) -> anyhow::Result<()> {
              birthday, slack_id, phone_number,
              addr_first_name, addr_last_name, addr_line_1, addr_line_2, addr_city,
              addr_state, addr_postcode, addr_country, addr_phone_number,
-             allowed_chats
+             allowed_chats, referred_by
          ) VALUES (
              $1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6,
              $7, NULLIF($8, ''), NULLIF($9, ''),
              NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), NULLIF($14, ''),
              NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''),
-             ARRAY(SELECT id FROM chat WHERE slug = 'all')
+             ARRAY(SELECT id FROM chat WHERE slug = 'all'),
+             (SELECT id FROM \"user\" WHERE referral_code = $19 AND deleted_at IS NULL)
          )
          ON CONFLICT (hca_id) DO UPDATE SET
              email = EXCLUDED.email,
@@ -95,13 +98,14 @@ async fn save_user(pool: &PgPool, token: &str) -> anyhow::Result<()> {
     .bind(&address.postal_code)
     .bind(&address.country)
     .bind(&address.phone_number)
+    .bind(referral)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 #[get("/login")]
-pub async fn start(req: HttpRequest) -> HttpResponse {
+pub async fn start(req: HttpRequest, query: web::Query<HashMap<String, String>>) -> HttpResponse {
     let scopes = Scopes {
         openid: false,
         profile: false,
@@ -113,7 +117,16 @@ pub async fn start(req: HttpRequest) -> HttpResponse {
         addresses: true,
         phone_number: true,
     };
-    login::handle_login(&req, scopes, site_url(CALLBACK)).await
+    let mut response = login::handle_login(&req, scopes, site_url(CALLBACK)).await;
+    if let Some(code) = query.into_inner().remove("ref").filter(|code| !code.is_empty() && code.len() <= 32) {
+        let cookie = Cookie::build(REFERRAL_COOKIE, code)
+            .path("/")
+            .http_only(true)
+            .max_age(actix_web::cookie::time::Duration::hours(1))
+            .finish();
+        let _ = response.add_cookie(&cookie);
+    }
+    response
 }
 
 #[get("/callback")]
@@ -136,8 +149,15 @@ pub async fn callback(
     let Some(token) = token.take() else {
         return response;
     };
-    match save_user(&pool, &token).await {
-        Ok(()) => response,
+    let referral = req.cookie(REFERRAL_COOKIE);
+    match save_user(&pool, &token, referral.as_ref().map(Cookie::value)).await {
+        Ok(()) => {
+            let mut response = response;
+            if referral.is_some() {
+                let _ = response.add_removal_cookie(&Cookie::build(REFERRAL_COOKIE, "").path("/").finish());
+            }
+            response
+        }
         Err(e) => {
             eprintln!("saving user failed: {e:#}");
             HttpResponse::InternalServerError().body("Couldn't sign you in, please try again")

@@ -10,6 +10,7 @@ mod mines;
 mod moderation;
 mod operations;
 mod projects;
+mod propaganda;
 mod territory;
 
 use actix_files::{Files, NamedFile};
@@ -69,6 +70,15 @@ async fn main() -> std::io::Result<()> {
         loop {
             interval.tick().await;
             joel::resolve_due(&ticker).await;
+        }
+    });
+
+    let poller = pool.clone();
+    actix_web::rt::spawn(async move {
+        let mut interval = actix_web::rt::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            propaganda::poll(&poller).await;
         }
     });
 
@@ -146,6 +156,8 @@ async fn main() -> std::io::Result<()> {
                 operations::launch,
             ))
             .service((auth::start, auth::callback, auth::session, auth::logout))
+            .service((propaganda::overview, propaganda::submit))
+            .service((propaganda::queue, propaganda::repoll, propaganda::verify))
             .service((chats::list, chats::messages, chats::create, chats::flag))
             .service((
                 moderation::chats,

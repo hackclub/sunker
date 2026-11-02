@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 
 const PAGE: i64 = 50;
+const RALLY_SCRIP: i32 = 10;
 
 const RESOURCES: [&str; 9] = [
     "chiprock",
@@ -408,6 +409,22 @@ async fn apply(
             .execute(&mut **tx)
             .await?;
             affected(result, "Ship")?;
+            if status == "approved" {
+                sqlx::query(
+                    "WITH due AS (
+                         SELECT u.referred_by AS id, 'Rallied user #' || u.id AS reason FROM \"user\" u
+                         WHERE u.id = $1 AND u.referred_by IS NOT NULL
+                           AND NOT EXISTS (SELECT 1 FROM resource_ledger l WHERE l.user_id = u.referred_by AND l.reason = 'Rallied user #' || u.id)
+                     ), granted AS (
+                         UPDATE resources r SET scrip = scrip + $2 FROM due WHERE r.user_id = due.id
+                     )
+                     INSERT INTO resource_ledger (user_id, reason, scrip) SELECT id, reason, $2 FROM due",
+                )
+                .bind(user)
+                .bind(RALLY_SCRIP)
+                .execute(&mut **tx)
+                .await?;
+            }
             format!("Set ship #{ship} to {status}")
         }
         "ship_delete" | "ship_restore" => {

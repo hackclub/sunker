@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 
 	onMount(() => {
@@ -21,7 +22,7 @@
 
 <main>
 	<h1>Hack Club Sunker</h1>
-	<a href="/login" rel="external">Enter HQ</a>
+	<a href="/login{page.url.search}" rel="external">Enter HQ</a>
 </main>
 
 <style>

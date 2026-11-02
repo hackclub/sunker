@@ -292,6 +292,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "hc_helper",
+ "reqwest",
  "serde_json",
  "sqlx",
 ]
