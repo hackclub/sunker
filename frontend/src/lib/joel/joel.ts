@@ -1,3 +1,4 @@
+import { colour } from '#lib/colors.js';
 import { ENEMIES, enemyName, neighbours, type Force, type HexMap } from '#lib/map.js';
 
 export type Hex = [number, number];
@@ -69,7 +70,7 @@ export const STATUSES: Record<Status, string> = {
 
 export const KINDS: Record<OrderKind, string> = { move: 'Move', spawn: 'Spawn', retreat: 'Retreat' };
 
-export const TONES = ['#e0904a', '#548cde', '#c86cd8', '#6cc47a', '#e0c84a', '#4ac8c8', '#e06c9a'];
+export const tone = (i: number) => colour(`joel-tone-${(i % 7) + 1}`);
 
 export const key = (row: number, col: number) => `${row},${col}`;
 

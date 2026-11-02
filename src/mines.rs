@@ -137,7 +137,7 @@ fn prize(body: &Value) -> Result<Prize, String> {
     })
 }
 
-fn slug(name: &str) -> String {
+pub fn slug(name: &str) -> String {
     let slug = name
         .to_lowercase()
         .split(|c: char| !c.is_ascii_alphanumeric())

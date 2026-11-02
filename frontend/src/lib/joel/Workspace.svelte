@@ -10,7 +10,7 @@
 	import {
 		KINDS,
 		STATUSES,
-		TONES,
+		tone,
 		adjacent,
 		followup,
 		forceText,
@@ -89,14 +89,14 @@
 	);
 
 	const trails = $derived.by((): Trail[] => {
-		const planned = orders.map((order, i) => ({ kind: order.kind, path: order.path, tone: TONES[i % TONES.length], bold: focus === i, faded: finished && focus !== i }));
+		const planned = orders.map((order, i) => ({ kind: order.kind, path: order.path, tone: tone(i), bold: focus === i, faded: finished && focus !== i }));
 		if (!finished) return planned.filter((_, i) => i !== drawing);
 		const walked = orders.flatMap((order, i) =>
-			order.kind === 'move' && order.steps?.length ? [{ kind: order.kind, path: order.steps.map((step) => [step.row, step.col] as Hex), tone: TONES[i % TONES.length], bold: focus === i }] : []
+			order.kind === 'move' && order.steps?.length ? [{ kind: order.kind, path: order.steps.map((step) => [step.row, step.col] as Hex), tone: tone(i), bold: focus === i }] : []
 		);
 		return [...planned, ...walked];
 	});
-	const draft = $derived(drawing !== null && orders[drawing] ? { path: orders[drawing].path, tone: TONES[drawing % TONES.length] } : null);
+	const draft = $derived(drawing !== null && orders[drawing] ? { path: orders[drawing].path, tone: tone(drawing) } : null);
 
 	$effect(() => {
 		if (wave.updated_at === synced || dirty || drawing !== null) return;
@@ -266,7 +266,7 @@
 				</div>
 			{/if}
 			{#each orders as order, i (i)}
-				<div class="card order" class:focused={focus === i} style:--tone={TONES[i % TONES.length]}>
+				<div class="card order" class:focused={focus === i} style:--tone={tone(i)}>
 					<button class="summary" onclick={() => (focus = focus === i ? null : i)}>
 						<span class="dot"></span>
 						<strong>{i + 1}. {KINDS[order.kind]}</strong>

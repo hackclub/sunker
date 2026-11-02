@@ -6,7 +6,7 @@
 	import JoelMap, { type Trail } from './JoelMap.svelte';
 	import Shell from './Shell.svelte';
 	import WaveCard from './WaveCard.svelte';
-	import { TONES, forceText, key, placeName, request, rings, stamp, total, type Hex, type JoelState, type Wave } from './joel.js';
+	import { forceText, key, placeName, request, rings, stamp, tone, total, type Hex, type JoelState, type Wave } from './joel.js';
 
 	let {
 		joel,
@@ -49,7 +49,7 @@
 
 	const trails = $derived.by((): Trail[] => {
 		if (!planned) return [];
-		return [...scheduled, ...drafts].flatMap((wave, i) => wave.orders.map((order) => ({ kind: order.kind, path: order.path, tone: TONES[i % TONES.length], faded: wave.status === 'draft' })));
+		return [...scheduled, ...drafts].flatMap((wave, i) => wave.orders.map((order) => ({ kind: order.kind, path: order.path, tone: tone(i), faded: wave.status === 'draft' })));
 	});
 
 	const touching = $derived(

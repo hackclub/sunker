@@ -1,10 +1,8 @@
 <script lang="ts">
 	import { BASES } from '#lib/bases.js';
-	import { MAP, PALETTE, css } from '#lib/colors.js';
+	import { MAP, PALETTE, colour, css } from '#lib/colors.js';
+	import { image } from '#lib/styles.svelte.js';
 	import { CORNERS, ENEMIES, WIDTH, bounds, neighbours, type Force, type PlacedTile } from '#lib/map.js';
-	import chunker from '#lib/assets/images/chunker.png';
-	import crawler from '#lib/assets/images/crawler.png';
-	import hopper from '#lib/assets/images/hopper.png';
 	import { forceText, key, placeName, total, type Hex, type OrderKind } from './joel.js';
 
 	export interface Trail {
@@ -37,17 +35,7 @@
 		onpick?: (row: number, col: number) => void;
 	} = $props();
 
-	const TINTS: Record<string, [string, number]> = {
-		forest: ['#2c6a2c', 0.45],
-		farmland: ['#c8d24a', 0.4],
-		houses: ['#b8aca4', 0.45],
-		buildings: ['#8e8ca0', 0.55],
-		mountain: ['#6e6a78', 0.55],
-		mine: ['#4a3828', 0.55],
-		highway: ['#484656', 0.35],
-		cactus: ['#4a8a3a', 0.2]
-	};
-	const SPRITES = { chunker, crawler, hopper };
+	const TINTS: Record<string, number> = { forest: 0.45, farmland: 0.4, houses: 0.45, buildings: 0.55, mountain: 0.55, mine: 0.55, highway: 0.35, cactus: 0.2 };
 
 	let width = $state(0);
 	let height = $state(0);
@@ -57,13 +45,15 @@
 	let loaded = $state(0);
 	let press: { x: number; y: number; view: { x: number; y: number; scale: number }; moved: boolean } | null = null;
 
-	const images = Object.fromEntries(
-		ENEMIES.map((enemy) => {
-			const image = new Image();
-			image.onload = () => loaded++;
-			image.src = SPRITES[enemy];
-			return [enemy, image];
-		})
+	const images = $derived(
+		Object.fromEntries(
+			ENEMIES.map((enemy) => {
+				const sprite = new Image();
+				sprite.onload = () => loaded++;
+				sprite.src = image(enemy);
+				return [enemy, sprite];
+			})
+		)
 	);
 
 	const placed = $derived(new Map(tiles.map((tile) => [key(tile.row, tile.col), tile])));
@@ -180,11 +170,11 @@
 			for (const variant of tile.variants) {
 				const tint = TINTS[variant];
 				if (!tint) continue;
-				context.fillStyle = css(tint[0], tint[1]);
+				context.fillStyle = css(colour(`joel-${variant}`), tint);
 				context.fill();
 			}
 			if (tile.base !== 'ocean' && tile.height < 1.5) {
-				context.fillStyle = css('#000000', Math.max(0, (1.2 - tile.height) * 0.22));
+				context.fillStyle = css(MAP.shadow, Math.max(0, (1.2 - tile.height) * 0.22));
 				context.fill();
 			}
 			context.strokeStyle = css(PALETTE.background, 0.35);
@@ -272,7 +262,7 @@
 					context.lineWidth = 3;
 					context.strokeStyle = PALETTE.background;
 					context.strokeText(String(force![enemy]), cx, sy + icon * 0.48);
-					context.fillStyle = '#ffffff';
+					context.fillStyle = colour('joel-label');
 					context.fillText(String(force![enemy]), cx, sy + icon * 0.48);
 				});
 			} else {
@@ -283,7 +273,7 @@
 				context.font = `600 ${Math.max(8, s * 0.38)}px Inter, sans-serif`;
 				context.textAlign = 'center';
 				context.textBaseline = 'middle';
-				context.fillStyle = '#ffffff';
+				context.fillStyle = colour('joel-label');
 				context.fillText(String(total(force)), sx, sy + 0.5);
 			}
 		}
@@ -296,7 +286,7 @@
 			context.lineWidth = line;
 			context.stroke();
 		};
-		outline(hover, css('#ffffff', 0.8), 1.5);
+		outline(hover, css(colour('joel-hover'), 0.8), 1.5);
 		outline(selected ? placed.get(selected) : null, PALETTE.accent, 3);
 	});
 

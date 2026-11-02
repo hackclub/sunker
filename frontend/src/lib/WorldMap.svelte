@@ -2,7 +2,7 @@
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
 	import { MAP, legible, rgb } from '#lib/colors.js';
-	import { CONTOUR, FOG_STRIDE, HIDDEN, MARK, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
+	import { CONTOUR, FOG_STRIDE, HIDDEN, MARK, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, look, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
 	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
 	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, aim, confine, frame, grid, middle, projector, unprojector, type Plane } from '#lib/view.js';
 	import { untrack } from 'svelte';
@@ -33,7 +33,7 @@
 	} = $props();
 
 	const LEVEL = 0.1;
-	const GRID = [...rgb(MAP.background), 0.03];
+	const appearance = $derived(look());
 	const GROVE = 0.4;
 	const SCRIBE = 100;
 	const ZOOM = 4;
@@ -47,7 +47,7 @@
 	let innerWidth = $state(0);
 	let innerHeight = $state(0);
 	let ratio = $state(1);
-	let canvas: HTMLCanvasElement;
+	let canvas: HTMLCanvasElement = $state()!;
 	let element: HTMLDivElement;
 	let painter: Renderer | undefined;
 	let restored = $state(0);
@@ -392,12 +392,14 @@
 
 	const trees = $derived.by(() => {
 		const found: number[][] = [];
+		const pinned: number[][] = [];
 		for (const { tile, row, col, x, y } of tiles) {
 			if (tile.variants.includes('sunker')) {
 				found.push([x, y, tile.height * LIFT, 0.6 + hash(col, row, 5) * 0.2, hash(col, row, 6), ROCK, y]);
 				found.push([x + (hash(col, row, 7) - 0.5) * 0.6, y + 0.2 + hash(col, row, 8) * 0.2, tile.height * LIFT, 0.25 + hash(col, row, 9) * 0.1, hash(col, row, 10), ROCK, y]);
 			}
 			if (tile.variants.includes('mountain')) found.push([x, y + 0.4, tile.height * LIFT, 0.9, hash(col, row, 12), sprite('mountain'), y]);
+			if (tile.variants.includes('camp')) pinned.push([x, y + 0.1, tile.height * LIFT, 1, 0, sprite('camp'), y]);
 			if (tile.variants.includes('cactus')) {
 				const count = 2 + Math.floor(hash(col, row, 30) * 2);
 				for (let k = 0; k < count; k++) {
@@ -428,11 +430,11 @@
 					const ty = (row + 0.15 + hash(col, row, 2) * 0.7) * GROVE;
 					const [dx, dy] = [Math.abs(tx - x), Math.abs(ty - y)];
 					if (dx > WIDTH / 2 || dx * 0.5 + dy * WIDTH / 2 > WIDTH / 2) continue;
-					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), sprite('tree'), y]);
+					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), sprite('tree1'), y]);
 				}
 			}
 		}
-		const kept = found.filter(([x, y]) => clear(x, y));
+		const kept = [...found.filter(([x, y]) => clear(x, y)), ...pinned];
 		const data = new Float32Array(kept.length * TREE_STRIDE);
 		kept.sort((a, b) => a[1] - b[1]).forEach((tree, i) => data.set(tree, i * TREE_STRIDE));
 		return data;
@@ -704,22 +706,25 @@
 	});
 
 	$effect(() => {
+		const target = canvas;
 		const lost = (event: Event) => event.preventDefault();
 		const restore = () => {
 			painter = undefined;
 			restored++;
 		};
-		canvas.addEventListener('webglcontextlost', lost);
-		canvas.addEventListener('webglcontextrestored', restore);
+		target.addEventListener('webglcontextlost', lost);
+		target.addEventListener('webglcontextrestored', restore);
 		return () => {
-			canvas.removeEventListener('webglcontextlost', lost);
-			canvas.removeEventListener('webglcontextrestored', restore);
+			target.removeEventListener('webglcontextlost', lost);
+			target.removeEventListener('webglcontextrestored', restore);
 			painter?.destroy();
+			painter = undefined;
 		};
 	});
 
 	const instances = $derived.by(() => {
 		const top = ceiling;
+		const blank = [...rgb(MAP.background), 0.03];
 		const data = new Float32Array(field.length * STRIDE);
 		field.forEach((hex, i) => {
 			const o = i * STRIDE;
@@ -736,7 +741,7 @@
 				if (roadOf(tile) || linked(hex.placed.row, hex.placed.col).length) data.set(nodes(hex.placed), o + 9);
 			} else {
 				data[o + 2] = top * LIFT;
-				data.set(GRID, o + 9);
+				data.set(blank, o + 9);
 			}
 		});
 		return data;
@@ -744,10 +749,11 @@
 
 	$effect(() => {
 		restored;
+		const surface = canvas;
 		const screen = { width: innerWidth, height: innerHeight, ratio: [ratio * detail[0], ratio * detail[1]] as [number, number] };
 		const hexes = field;
 		const data = instances;
-		const gl = (painter ??= renderer(canvas) ?? fallback(canvas));
+		const gl = (painter ??= renderer(surface) ?? fallback(surface));
 		gl.plant(trees);
 		gl.shroud(clouds);
 		gl.pave(ramps);
@@ -807,7 +813,9 @@
 	}}
 	onclick={table ? undefined : onclick}
 >
-	<canvas bind:this={canvas}></canvas>
+	{#key appearance}
+		<canvas bind:this={canvas}></canvas>
+	{/key}
 	{#if !table && trail}
 		<svg class="trail" width={innerWidth} height={innerHeight}>
 			<defs>
@@ -954,18 +962,18 @@
 
 	.trail > path {
 		fill: none;
-		stroke: #ffffff;
+		stroke: var(--map-trail);
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
 
 	.trail > path.edge {
-		stroke: #000000;
+		stroke: var(--map-trail-edge);
 	}
 
 	.trail marker path {
-		fill: #ffffff;
-		stroke: #000000;
+		fill: var(--map-trail);
+		stroke: var(--map-trail-edge);
 		stroke-width: 1.4;
 		stroke-linejoin: round;
 	}

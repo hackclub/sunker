@@ -102,7 +102,7 @@ struct World {
     tiles: HashMap<Hex, Tile>,
     occupied: HashMap<Hex, Value>,
     rings: HashMap<Hex, u32>,
-    origin: Option<Hex>,
+    origins: Vec<Hex>,
 }
 
 async fn world(pool: &PgPool) -> Result<World, Failure> {
@@ -125,8 +125,8 @@ async fn world(pool: &PgPool) -> Result<World, Failure> {
         .await?;
     let occupied: HashMap<Hex, Value> = rows.into_iter().map(|(row, col, enemies)| ((row, col), enemies)).collect();
     let rings = territory::rings(&tiles.keys().copied().collect(), &occupied.keys().copied().collect::<HashSet<_>>());
-    let origin = tiles.iter().find(|(_, tile)| tile.has("origin")).map(|(hex, _)| *hex);
-    Ok(World { tiles, occupied, rings, origin })
+    let origins = tiles.iter().filter(|(_, tile)| tile.has("origin")).map(|(hex, _)| *hex).collect();
+    Ok(World { tiles, occupied, rings, origins })
 }
 
 impl World {
@@ -135,10 +135,9 @@ impl World {
     }
 
     fn route(&self, to: Hex, sea: bool) -> Option<Route> {
-        let from = self.origin?;
-        let mut best = HashMap::from([(from, (0, 0, 0))]);
+        let mut best: HashMap<Hex, (i64, i64, i64)> = self.origins.iter().map(|hex| (*hex, (0, 0, 0))).collect();
         let mut previous = HashMap::new();
-        let mut queue = BinaryHeap::from([Reverse(((0i64, 0i64, 0i64), from))]);
+        let mut queue: BinaryHeap<_> = self.origins.iter().map(|hex| Reverse(((0i64, 0i64, 0i64), *hex))).collect();
         while let Some(Reverse((key, hex))) = queue.pop() {
             if hex == to {
                 let mut path = vec![to];

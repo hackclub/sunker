@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { PALETTE } from '#lib/colors.js';
+	import { DEFAULTS, colour } from '#lib/colors.js';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
 
-	const variables = Object.entries(PALETTE)
-		.map(([name, value]) => `--${name}: ${value};`)
-		.join(' ');
+	const variables = $derived(
+		Object.keys(DEFAULTS)
+			.map((key) => `--${key}: ${colour(key)};`)
+			.join(' ')
+	);
 </script>
 
 <svelte:head>

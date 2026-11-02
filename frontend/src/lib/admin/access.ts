@@ -10,6 +10,7 @@ export type Permissions = {
 	joel: boolean;
 	mines: boolean;
 	video: boolean;
+	styling: boolean;
 };
 
 export type Access = { superadmin: boolean; permissions: Permissions };
@@ -22,7 +23,8 @@ export const TABS = [
 	{ slug: 'moderation', name: 'Moderation' },
 	{ slug: 'joel', name: 'Joel View' },
 	{ slug: 'mines', name: 'Mines' },
-	{ slug: 'video', name: 'Video Verification' }
+	{ slug: 'video', name: 'Video Verification' },
+	{ slug: 'styling', name: 'Styling' }
 ] as const;
 
 export const ACTIONS = [

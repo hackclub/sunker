@@ -18,8 +18,6 @@
 		const [a, b] = [rgb(from), rgb(to)];
 		return `#${a.map((c, i) => Math.round((c + (b[i] - c) * t) * 255).toString(16).padStart(2, '0')).join('')}`;
 	};
-	const LIGHT = mix(PALETTE.accent, '#ffffff', 0.45);
-	const BASE = PALETTE.hover;
 </script>
 
 <script lang="ts">
@@ -59,7 +57,7 @@
 
 	const fill = (code: string) => {
 		const count = counts.get(code) ?? 0;
-		return count && max ? mix(BASE, LIGHT, 0.2 + 0.8 * Math.sqrt(count / max)) : BASE;
+		return count && max ? mix(PALETTE.hover, mix(PALETTE.accent, '#ffffff', 0.45), 0.2 + 0.8 * Math.sqrt(count / max)) : PALETTE.hover;
 	};
 
 	onMount(() => {

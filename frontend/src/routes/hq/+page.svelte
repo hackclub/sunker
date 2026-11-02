@@ -1,19 +1,7 @@
 <script lang="ts">
-	import plank from '#lib/assets/images/plank.png';
-	import plank2 from '#lib/assets/images/plank2.png';
-	import plank3 from '#lib/assets/images/plank3.png';
-	import table from '#lib/assets/images/table.png';
-	import building1 from '#lib/assets/images/building1.png';
-	import building2 from '#lib/assets/images/building2.png';
-	import projectsIcon from '#lib/assets/images/projects-icon.png';
-	import propagandaIcon from '#lib/assets/images/propaganda-icon.png';
-	import helpIcon from '#lib/assets/images/help-icon.png';
-	import chatIcon from '#lib/assets/images/chat-icon.png';
-	import battleIcon from '#lib/assets/images/battle-icon.png';
-	import profileIcon from '#lib/assets/images/profile.png';
-	import xIcon from '#lib/assets/images/x-icon.png';
 	import SidePanel, { DIALOG_WIDTH, offset } from '#lib/SidePanel.svelte';
 	import { PALETTE } from '#lib/colors.js';
+	import { image } from '#lib/styles.svelte.js';
 	import WorldMap from '#lib/WorldMap.svelte';
 	import Mines, { bake } from '#lib/Mines.svelte';
 	import { params, update } from '#lib/url.svelte.js';
@@ -36,14 +24,14 @@
 
 	const panels: Record<Side, Section[]> = $state({
 		left: [
-			{ label: 'Projects', icon: projectsIcon, component: Projects, disabled: false, dot: false },
-			{ label: 'Propaganda', icon: propagandaIcon, component: Propaganda, disabled: false, dot: false },
-			{ label: 'Help', icon: helpIcon, component: Help, disabled: false, dot: false }
+			{ label: 'Projects', icon: 'projects-icon', component: Projects, disabled: false, dot: false },
+			{ label: 'Propaganda', icon: 'propaganda-icon', component: Propaganda, disabled: false, dot: false },
+			{ label: 'Help', icon: 'help-icon', component: Help, disabled: false, dot: false }
 		],
 		right: [
-			{ label: 'Chat', icon: chatIcon, component: Chat, disabled: false, dot: false },
-			{ label: 'Operations', icon: battleIcon, component: Operations, disabled: false, dot: false },
-			{ label: 'Profile', icon: profileIcon, component: Profile, disabled: false, dot: false }
+			{ label: 'Chat', icon: 'chat-icon', component: Chat, disabled: false, dot: false },
+			{ label: 'Operations', icon: 'battle-icon', component: Operations, disabled: false, dot: false },
+			{ label: 'Profile', icon: 'profile', component: Profile, disabled: false, dot: false }
 		]
 	});
 
@@ -65,8 +53,8 @@
 		else if (open.left || open.right) update({ left: null, right: null });
 	}
 
-	const PLANKS = [plank, plank2, plank3];
-	const BUILDINGS = [building1, building2];
+	const PLANKS = ['plank', 'plank2', 'plank3'];
+	const BUILDINGS = ['building1', 'building2'];
 	const SCALE = 4;
 	const WIDTH = 128;
 	const HEIGHT = 16;
@@ -216,8 +204,8 @@
 	});
 
 	$effect(() => {
-		settle(PLANKS).then((loaded) => (images = loaded));
-		settle(BUILDINGS).then((loaded) => (buildings = loaded));
+		settle(PLANKS.map(image)).then((loaded) => (images = loaded));
+		settle(BUILDINGS.map(image)).then((loaded) => (buildings = loaded));
 	});
 
 	$effect(() => {
@@ -350,7 +338,7 @@
 	<canvas class="floor" class:smooth={SMOOTH} bind:this={floor}></canvas>
 	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
-	<img class="table" src={table} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
+	<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
 	{#if hovering && docked}
 		{#if hovering === 'mines'}
 			<svg class="outline seam" viewBox="0 0 {innerWidth} {innerHeight}">
@@ -385,7 +373,7 @@
 				<header class={side}>
 					<h2>{section.label}</h2>
 					<button class="close" aria-label="Close" onclick={() => update({ [side]: null })}>
-						<img src={xIcon} alt="" />
+						<img src={image('x-icon')} alt="" />
 					</button>
 				</header>
 				<div class="body"><section.component /></div>
@@ -406,7 +394,7 @@
 					{disabled}
 					onclick={() => toggle(side, i)}
 				>
-					<img src={icon} alt="" />
+					<img src={image(icon)} alt="" />
 					{#if dot}<span class="dot"></span>{/if}
 					<span class="tip {side}">{label}</span>
 				</button>

@@ -2,16 +2,7 @@ import { BASES, LIBRARY, NAMES, NOISE } from '#lib/bases.js';
 import { MAP, css, rgb, vec3 } from '#lib/colors.js';
 import { CORNERS, FRONT, HEIGHT, WIDTH } from '#lib/map.js';
 import { perlin } from '#lib/noise.js';
-import mountain from '#lib/assets/images/mountain.png';
-import building1 from '#lib/assets/images/building1.png';
-import building2 from '#lib/assets/images/building2.png';
-import house1 from '#lib/assets/images/house1.png';
-import house2 from '#lib/assets/images/house2.png';
-import tree from '#lib/assets/images/tree.png';
-import cactus from '#lib/assets/images/cactus.png';
-import chunker from '#lib/assets/images/chunker.png';
-import crawler from '#lib/assets/images/crawler.png';
-import hopper from '#lib/assets/images/hopper.png';
+import { image, styles } from '#lib/styles.svelte.js';
 
 export const STRIDE = 18;
 export const THIN = 1;
@@ -24,19 +15,20 @@ export const MARK = 10;
 export const ROCK = 1;
 
 const SPRITES = [
-	{ name: 'mountain', src: mountain, size: [256, 256], anchor: [112, 200], unit: 1.9 / 256, flat: true },
-	{ name: 'building1', src: building1, size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
-	{ name: 'building2', src: building2, size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
-	{ name: 'house1', src: house1, size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
-	{ name: 'house2', src: house2, size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
-	{ name: 'tree', src: tree, size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
-	{ name: 'cactus', src: cactus, size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false },
-	{ name: 'chunker', src: chunker, size: [128, 128], anchor: [66, 124], unit: 0.011, flat: false },
-	{ name: 'crawler', src: crawler, size: [128, 128], anchor: [62, 112], unit: 0.0055, flat: false },
-	{ name: 'hopper', src: hopper, size: [128, 128], anchor: [66, 110], unit: 0.0055, flat: false }
+	{ name: 'mountain', size: [256, 256], anchor: [112, 200], unit: 1.9 / 256, flat: true },
+	{ name: 'building1', size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
+	{ name: 'building2', size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
+	{ name: 'house1', size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
+	{ name: 'house2', size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
+	{ name: 'tree1', size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
+	{ name: 'cactus', size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false },
+	{ name: 'chunker', size: [128, 128], anchor: [66, 124], unit: 0.011, flat: false },
+	{ name: 'crawler', size: [128, 128], anchor: [62, 112], unit: 0.0055, flat: false },
+	{ name: 'hopper', size: [128, 128], anchor: [66, 110], unit: 0.0055, flat: false },
+	{ name: 'camp', size: [128, 128], anchor: [62, 102], unit: 0.016, flat: false }
 ] as const;
 export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
-const TREE = sprite('tree');
+const TREE = sprite('tree1');
 
 const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker', 'origin'];
 const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
@@ -45,12 +37,20 @@ const hovering = (value: number) => value > 0 || value < -1.5;
 export const pack = (variants: string[]) => variants.reduce((mask, variant) => (VARIANTS.includes(variant) ? mask | flag(variant) : mask), 0);
 const FLAGS = VARIANTS.map((variant) => `const int ${variant.toUpperCase()} = ${flag(variant)};`).join('\n');
 
+const measured = ({ name, size: [w, h], anchor: [ax, ay], unit, flat }: (typeof SPRITES)[number]) => {
+	const { width, height } = styles.images[name] ?? { width: w, height: h };
+	return { size: [width, height], anchor: [(ax * width) / w, (ay * height) / h], unit: (unit * w) / width, flat };
+};
+
 const float = (n: number) => (Number.isInteger(n) ? `${n}.0` : `${n}`);
-const SPRITE_CONSTANTS = `
-const vec2 SPRITE_SIZES[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES.map(({ size }) => `vec2(${size.map(float)})`)});
-const vec2 SPRITE_ANCHORS[${SPRITES.length}] = vec2[${SPRITES.length}](${SPRITES.map(({ anchor }) => `vec2(${anchor.map(float)})`)});
-const float SPRITE_UNITS[${SPRITES.length}] = float[${SPRITES.length}](${SPRITES.map(({ unit }) => float(unit))});
-const bool SPRITE_FLAT[${SPRITES.length}] = bool[${SPRITES.length}](${SPRITES.map(({ flat }) => flat)});`;
+const SPRITE_CONSTANTS = () => {
+	const shapes = SPRITES.map(measured);
+	return `
+const vec2 SPRITE_SIZES[${shapes.length}] = vec2[${shapes.length}](${shapes.map(({ size }) => `vec2(${size.map(float)})`)});
+const vec2 SPRITE_ANCHORS[${shapes.length}] = vec2[${shapes.length}](${shapes.map(({ anchor }) => `vec2(${anchor.map(float)})`)});
+const float SPRITE_UNITS[${shapes.length}] = float[${shapes.length}](${shapes.map(({ unit }) => float(unit))});
+const bool SPRITE_FLAT[${shapes.length}] = bool[${shapes.length}](${shapes.map(({ flat }) => flat)});`;
+};
 
 const BORDERS: Record<number, { width: number; focus: number; alpha: number }> = { [THIN]: { width: 0.015, focus: 0.035, alpha: 0.4 }, [CONTOUR]: { width: 0.08, focus: 0.1, alpha: 1 } };
 
@@ -153,10 +153,10 @@ void main() {
 	v_nodes = i_outline.rgb;
 }`;
 
-const SURFACES = [LIBRARY, ...NAMES.map((name, i) => `${BASES[name].functions ?? ''}\nvec3 base_${i}(vec2 world, vec2 local) { ${BASES[name].glsl} }`)].join('\n');
+const SURFACES = () => [LIBRARY, ...NAMES.map((name, i) => `${BASES[name].functions ?? ''}\nvec3 base_${i}(vec2 world, vec2 local) { ${BASES[name].glsl} }`)].join('\n');
 const DISPATCH = NAMES.map((_, i) => `\tif (id < ${i + 1.5}) return base_${i}(world, local);`).join('\n');
 
-const FRAGMENT = `#version 300 es
+const FRAGMENT = () => `#version 300 es
 precision highp float;
 in vec2 v_local;
 in float v_kind;
@@ -182,7 +182,7 @@ const vec3 HOSTILE_HOVER = ${vec3(MAP.hostileHover)};
 const vec3 HOSTILE_LINE = ${vec3(MAP.hostileLine)};
 const vec3 LINE = ${vec3(MAP.line)};
 const vec3 GOLD = ${vec3(MAP.origin)};
-const vec3 WHITE = vec3(1.0);
+const vec3 WHITE = ${vec3(MAP.mark)};
 const vec3 ASPHALT = ${vec3(MAP.asphalt)};
 const vec3 PAINT = ${vec3(MAP.paint)};
 const vec3 HEDGE = ${vec3(MAP.hedge)};
@@ -193,7 +193,7 @@ vec3 dither(vec3 rgb) {
 	float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 	return rgb + (noise - 0.5) / 255.0;
 }
-${SURFACES}
+${SURFACES()}
 float hexagon(vec2 p) {
 	return max(abs(p.x), max(abs(dot(p, vec2(0.5, 0.8660254))), abs(dot(p, vec2(0.5, -0.8660254)))));
 }
@@ -452,7 +452,7 @@ void main() {
 	v_length = span;
 }`;
 
-const RAMP_FRAGMENT = `#version 300 es
+const RAMP_FRAGMENT = () => `#version 300 es
 precision highp float;
 in float v_across;
 in float v_along;
@@ -492,12 +492,12 @@ void main() {
 	color = vec4(ASPHALT, 1.0 - smoothstep(width - aa, width, d));
 }`;
 
-const TREE_VERTEX = `#version 300 es
+const TREE_VERTEX = () => `#version 300 es
 in vec2 a_corner;
 in vec3 i_root;
 in vec3 i_tree;
 in float i_tile;
-uniform float u_shadow;${SPRITE_CONSTANTS}
+uniform float u_shadow;${SPRITE_CONSTANTS()}
 ${PROJECT}
 out vec2 v_offset;
 out vec2 v_uv;
@@ -523,7 +523,7 @@ void main() {
 	v_kind = i_tree.z;
 }`;
 
-const TREE_FRAGMENT = `#version 300 es
+const TREE_FRAGMENT = () => `#version 300 es
 precision highp float;
 in vec2 v_offset;
 in vec2 v_uv;
@@ -586,7 +586,7 @@ void main() {
 	gl_Position = project(v_world - vec2(0.0, u_lift + 0.15));
 }`;
 
-const FOG_FRAGMENT = `#version 300 es
+const FOG_FRAGMENT = () => `#version 300 es
 precision highp float;
 in vec2 v_world;
 uniform sampler2D u_fog;
@@ -669,13 +669,16 @@ function link(gl: WebGL2RenderingContext, vertex: string, fragment: string) {
 	return null;
 }
 
+export const look = () =>
+	[FRAGMENT(), TREE_VERTEX(), TREE_FRAGMENT(), RAMP_FRAGMENT(), FOG_FRAGMENT(), MAP.background, ...SPRITES.map(({ name }) => image(name))].join('\n');
+
 export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
 	if (!gl) return null;
-	const program = link(gl, VERTEX, FRAGMENT);
-	const forest = link(gl, TREE_VERTEX, TREE_FRAGMENT);
-	const asphalt = link(gl, RAMP_VERTEX, RAMP_FRAGMENT);
-	const mist = link(gl, FOG_VERTEX, FOG_FRAGMENT);
+	const program = link(gl, VERTEX, FRAGMENT());
+	const forest = link(gl, TREE_VERTEX(), TREE_FRAGMENT());
+	const asphalt = link(gl, RAMP_VERTEX, RAMP_FRAGMENT());
+	const mist = link(gl, FOG_VERTEX, FOG_FRAGMENT());
 	if (!program || !forest || !asphalt || !mist) return null;
 
 	const shape = template();
@@ -755,7 +758,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	gl.uniform2f(gl.getUniformLocation(program, 'u_seed'), Math.random() * 100, Math.random() * 100);
 	gl.useProgram(forest);
 	gl.uniform1iv(gl.getUniformLocation(forest, 'u_sprites'), SPRITES.map((_, k) => k));
-	SPRITES.forEach(({ src }, k) => {
+	SPRITES.forEach(({ name }, k) => {
 		const texture = gl.createTexture();
 		gl.activeTexture(gl.TEXTURE0 + k);
 		gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -770,7 +773,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		};
-		sprite.src = src;
+		sprite.src = image(name);
 	});
 
 	gl.enable(gl.BLEND);
@@ -905,13 +908,14 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	let shrouded: Float32Array = new Float32Array();
 	let source: Float32Array | undefined;
 	let last: Float32Array | undefined;
-	const sprites = SPRITES.map(({ src }) => {
+	const shapes = SPRITES.map(measured);
+	const sprites = SPRITES.map(({ name }) => {
 		const sprite = new Image();
 		sprite.onload = () => {
 			stale = true;
 			renderer.draw();
 		};
-		sprite.src = src;
+		sprite.src = image(name);
 		return sprite;
 	});
 
@@ -1150,7 +1154,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 		}
 		if (mark) {
 			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
-			context.strokeStyle = mark > 1 ? css(MAP.highlight) : '#ffffff';
+			context.strokeStyle = css(mark > 1 ? MAP.highlight : MAP.mark);
 			context.lineWidth = 0.2 * scale;
 			context.stroke();
 		}
@@ -1237,7 +1241,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 			const span = (project(x + 1, y - lift)[0] - rx) * size;
 			if (kind > 1.5) {
 				const sprite = sprites[Math.round(kind) - 2];
-				const { size: [width, height], anchor, unit, flat } = SPRITES[Math.round(kind) - 2];
+				const { size: [width, height], anchor, unit, flat } = shapes[Math.round(kind) - 2];
 				if (!sprite.complete || !sprite.naturalWidth) continue;
 				context.save();
 				if (flat) {

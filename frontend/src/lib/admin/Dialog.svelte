@@ -49,7 +49,7 @@
 	}
 
 	dialog::backdrop {
-		background: rgb(0 0 0 / 0.6);
+		background: var(--backdrop);
 	}
 
 	.body {

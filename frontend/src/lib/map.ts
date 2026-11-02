@@ -39,7 +39,14 @@ export interface PlacedTile {
 	y: number;
 }
 
-export const DEFAULT_TILE: Required<Tile> = { height: 0.5, base: 'plain', side: MAP.side, variants: [] };
+export const DEFAULT_TILE: Required<Tile> = {
+	height: 0.5,
+	base: 'plain',
+	get side() {
+		return MAP.side;
+	},
+	variants: []
+};
 
 export const SIZE = 1;
 export const WIDTH = Math.sqrt(3) * SIZE;

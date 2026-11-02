@@ -5,6 +5,7 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release && r
 COPY build.rs build.rs
 COPY migrations migrations
 COPY src src
+COPY frontend/src/lib/assets/images frontend/src/lib/assets/images
 RUN touch src/main.rs && cargo build --release
 
 FROM oven/bun:1 AS frontend

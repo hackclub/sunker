@@ -1,6 +1,6 @@
 <script lang="ts" module>
 	import { BASES } from '#lib/bases.js';
-	import { rgb } from '#lib/colors.js';
+	import { colour, rgb } from '#lib/colors.js';
 	import { RING_CHARSETS, RING_COUNT } from '#lib/rings.svelte.js';
 
 	const BANDS = 3;
@@ -10,16 +10,21 @@
 	const CHURN = 0.08;
 	const SHARP = 3;
 	const FRAMES = 4;
-	const DIRT = rgb(BASES.dirt.flat);
-	const GRAY = rgb('#2a2b2d');
-
-	const tint = (light: number, depth = 0, alpha = 1) =>
-		`rgb(${DIRT.map((c, i) => Math.round((Math.min(1, c * light) * (1 - depth) + GRAY[i] * depth) * 255)).join(' ')} / ${alpha})`;
+	let mixed: { key: string; dirt: number[]; gray: number[] } | undefined;
+	const tint = (light: number, depth = 0, alpha = 1) => {
+		const key = BASES.dirt.flat + colour('mines-depth');
+		if (mixed?.key !== key) mixed = { key, dirt: rgb(BASES.dirt.flat), gray: rgb(colour('mines-depth')) };
+		const { dirt, gray } = mixed;
+		return `rgb(${dirt.map((c, i) => Math.round((Math.min(1, c * light) * (1 - depth) + gray[i] * depth) * 255)).join(' ')} / ${alpha})`;
+	};
 
 	let baking: Promise<string[][]> | undefined;
 	let baked: string[][] | undefined;
+	let bakedFor = '';
 
 	export function bake() {
+		const signature = tint(1, 0.5);
+		if (signature !== bakedFor) [baking, bakedFor] = [undefined, signature];
 		return (baking ??= document.fonts.load(FONT).then(async () => {
 			let light = 0.62;
 			const rings = RING_CHARSETS.toReversed().map((set, i) => {
@@ -66,13 +71,12 @@
 	import { untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { RESOURCE_NAMES } from '#lib/admin/analytics.js';
-	import building1 from '#lib/assets/images/building1.png';
-	import building2 from '#lib/assets/images/building2.png';
 	import { PALETTE } from '#lib/colors.js';
 	import Dialog from '#lib/Dialog.svelte';
 	import { request } from '#lib/joel/joel.js';
 	import type { Prize, Contract } from '#lib/mines.js';
 	import { load } from '#lib/projects.svelte.js';
+	import { image } from '#lib/styles.svelte.js';
 	import { params, update } from '#lib/url.svelte.js';
 
 	let { onback, onproject }: { onback: () => void; onproject: () => void } = $props();
@@ -91,7 +95,7 @@
 	const RISE = 0.16;
 	const NEAR = 0.15;
 	const STEP = 700;
-	const BUILDINGS = [building1, building2];
+	const BUILDINGS = ['building1', 'building2'];
 	const TOWERS = [
 		[-3.6, 0.55],
 		[-3, 0.75],
@@ -254,7 +258,7 @@
 		<div class="world" style:transform={drone(DEPTH)} in:fly out:fly={{ back: true }}>
 			<div class="sky" style:width="{SKY[0] * unit}px" style:height="{SKY[1] * unit}px" style:transform="rotateY({YAW}deg) translateZ({-SKY[2] * unit}px) translate(-50%, -100%)">
 				{#each TOWERS as [x, height], i}
-					<img class="tower" src={BUILDINGS[i % BUILDINGS.length]} alt="" style:left="{(SKY[0] / 2 + x) * unit}px" style:height="{height * unit}px" />
+					<img class="tower" src={image(BUILDINGS[i % BUILDINGS.length])} alt="" style:left="{(SKY[0] / 2 + x) * unit}px" style:height="{height * unit}px" />
 				{/each}
 			</div>
 			<div class="ledge" style:--ledge={tint(1)} style:width={rim.width} style:height={rim.height} style:clip-path={rim.clip} style:transform={rim.transform}></div>

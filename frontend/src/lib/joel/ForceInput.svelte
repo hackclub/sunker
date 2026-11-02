@@ -1,12 +1,8 @@
 <script lang="ts">
 	import { ENEMIES, enemyName, type Force } from '#lib/map.js';
-	import chunker from '#lib/assets/images/chunker.png';
-	import crawler from '#lib/assets/images/crawler.png';
-	import hopper from '#lib/assets/images/hopper.png';
+	import { image } from '#lib/styles.svelte.js';
 
 	let { force, disabled = false, available, onchange }: { force: Force; disabled?: boolean; available?: Force; onchange: (force: Force) => void } = $props();
-
-	const SPRITES = { chunker, crawler, hopper };
 
 	function set(enemy: (typeof ENEMIES)[number], value: number) {
 		const next = { ...force };
@@ -19,7 +15,7 @@
 <div class="force">
 	{#each ENEMIES as enemy (enemy)}
 		<label title={enemyName(enemy)}>
-			<img src={SPRITES[enemy]} alt="" />
+			<img src={image(enemy)} alt="" />
 			<input type="number" min="0" value={force[enemy] ?? 0} {disabled} oninput={(event) => set(enemy, Number(event.currentTarget.value))} />
 			<span>{enemyName(enemy)}{#if available}<em> / {available[enemy] ?? 0}</em>{/if}</span>
 		</label>

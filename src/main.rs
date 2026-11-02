@@ -11,6 +11,7 @@ mod moderation;
 mod operations;
 mod projects;
 mod propaganda;
+mod styling;
 mod territory;
 
 use actix_files::{Files, NamedFile};
@@ -63,6 +64,7 @@ async fn main() -> std::io::Result<()> {
 
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
     let pool = web::Data::new(database::init(&url).await.map_err(std::io::Error::other)?);
+    styling::seed(&pool).await.map_err(std::io::Error::other)?;
 
     let ticker = pool.clone();
     actix_web::rt::spawn(async move {
@@ -85,6 +87,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(pool.clone())
+            .app_data(web::PayloadConfig::new(16 << 20))
             .wrap_fn(|req, srv| {
                 let immutable = req.path().starts_with("/_app/immutable/");
                 let response = srv.call(req);
@@ -158,6 +161,19 @@ async fn main() -> std::io::Result<()> {
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((propaganda::overview, propaganda::submit))
             .service((propaganda::queue, propaganda::repoll, propaganda::verify))
+            .service((styling::manifest, styling::image, styling::events))
+            .service((
+                styling::overview,
+                styling::version,
+                styling::upload,
+                styling::activate,
+                styling::remove_version,
+                styling::declare,
+                styling::save_slot,
+                styling::remove_slot,
+                styling::set_colour,
+                styling::progress,
+            ))
             .service((chats::list, chats::messages, chats::create, chats::flag))
             .service((
                 moderation::chats,

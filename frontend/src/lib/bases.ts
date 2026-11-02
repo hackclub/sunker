@@ -1,3 +1,5 @@
+import { colour, vec3 } from '#lib/colors.js';
+
 export interface Base {
 	glsl: string;
 	flat: string;
@@ -32,12 +34,22 @@ float grass_blade(vec2 q, float side, float radius) {
 }`;
 
 export const BASES: Record<string, Base> = {
-	plain: { glsl: 'return vec3(58.0, 68.0, 102.0) / 255.0;', flat: '#3a4466' },
+	plain: {
+		get flat() {
+			return colour('plain');
+		},
+		get glsl() {
+			return `return ${vec3(colour('plain'))};`;
+		}
+	},
 	grass: {
-		flat: '#6cc25e',
-		glsl: `
+		get flat() {
+			return colour('grass');
+		},
+		get glsl() {
+			return `
 	float n = 0.5 * perlin(world * 0.5) + 0.3 * perlin(world * 1.2) + 0.2 * perlin(world * 2.6) + 0.12 * perlin(world * 6.0) + 0.08 * perlin(world * 14.0);
-	vec3 color = mix(vec3(92.0, 184.0, 88.0), vec3(130.0, 208.0, 104.0), clamp(n * 0.9 + 0.5, 0.0, 1.0)) / 255.0;
+	vec3 color = mix(${vec3(colour('grass-low'))}, ${vec3(colour('grass-high'))}, clamp(n * 0.9 + 0.5, 0.0, 1.0));
 	float blades = 1e9;
 	vec2 cell = floor(world / 0.4);
 	for (int y = -1; y <= 1; y++) {
@@ -54,13 +66,17 @@ export const BASES: Record<string, Base> = {
 		}
 	}
 	float aa = fwidth(blades);
-	return mix(vec3(62.0, 156.0, 72.0) / 255.0, color, smoothstep(0.018 - aa, 0.018 + aa, blades));`
+	return mix(${vec3(colour('grass-blade'))}, color, smoothstep(0.018 - aa, 0.018 + aa, blades));`;
+		}
 	},
 	brush: {
-		flat: '#d2bd6c',
-		glsl: `
+		get flat() {
+			return colour('brush');
+		},
+		get glsl() {
+			return `
 	float n = 0.5 * perlin(world * 0.5) + 0.3 * perlin(world * 1.2) + 0.2 * perlin(world * 2.6) + 0.12 * perlin(world * 6.0) + 0.08 * perlin(world * 14.0);
-	vec3 color = mix(vec3(198.0, 178.0, 96.0), vec3(226.0, 204.0, 122.0), clamp(n * 0.9 + 0.5, 0.0, 1.0)) / 255.0;
+	vec3 color = mix(${vec3(colour('brush-low'))}, ${vec3(colour('brush-high'))}, clamp(n * 0.9 + 0.5, 0.0, 1.0));
 	float blades = 1e9;
 	vec2 cell = floor(world / 0.4);
 	for (int y = -1; y <= 1; y++) {
@@ -77,21 +93,29 @@ export const BASES: Record<string, Base> = {
 		}
 	}
 	float aa = fwidth(blades);
-	return mix(vec3(176.0, 150.0, 72.0) / 255.0, color, smoothstep(0.016 - aa, 0.016 + aa, blades));`
+	return mix(${vec3(colour('brush-blade'))}, color, smoothstep(0.016 - aa, 0.016 + aa, blades));`;
+		}
 	},
 	sand: {
-		flat: '#f6e2b0',
-		glsl: `
+		get flat() {
+			return colour('sand');
+		},
+		get glsl() {
+			return `
 	vec2 p = world * 2.5;
 	float wave = sin(p.y * 3.0 + p.x * 0.8 + perlin(p * 0.6) * 4.0);
 	float aa = fwidth(wave);
-	return mix(vec3(246.0, 226.0, 176.0), vec3(232.0, 206.0, 154.0), smoothstep(0.7 - aa, 0.7 + aa, wave)) / 255.0;`
+	return mix(${vec3(colour('sand'))}, ${vec3(colour('sand-ripple'))}, smoothstep(0.7 - aa, 0.7 + aa, wave));`;
+		}
 	},
 	concrete: {
-		flat: '#8e8ca0',
-		glsl: `
+		get flat() {
+			return colour('concrete');
+		},
+		get glsl() {
+			return `
 	float n = 0.6 * perlin(world * 1.5) + 0.3 * perlin(world * 5.0) + 0.1 * perlin(world * 20.0);
-	vec3 color = vec3(142.0, 140.0, 160.0) / 255.0 * (1.0 + n * 0.08);
+	vec3 color = ${vec3(colour('concrete'))} * (1.0 + n * 0.08);
 	float specks = 1e9;
 	float tone = 0.0;
 	vec2 cell = floor(world / 0.1);
@@ -108,18 +132,22 @@ export const BASES: Record<string, Base> = {
 		}
 	}
 	float aa = fwidth(specks);
-	vec3 speck = tone > 0.5 ? vec3(170.0, 170.0, 190.0) / 255.0 : vec3(118.0, 114.0, 136.0) / 255.0;
+	vec3 speck = tone > 0.5 ? ${vec3(colour('concrete-speck-light'))} : ${vec3(colour('concrete-speck-dark'))};
 	color = mix(color, speck, (1.0 - smoothstep(-aa, aa, specks)) * 0.7);
 	vec2 grid = abs(fract(world / 1.5 + 0.5) - 0.5) * 1.5;
 	float joint = min(grid.x, grid.y);
 	float ja = fwidth(joint);
-	return mix(color * 0.82, color, smoothstep(0.008 - ja, 0.008 + ja, joint));`
+	return mix(color * 0.82, color, smoothstep(0.008 - ja, 0.008 + ja, joint));`;
+		}
 	},
 	dirt: {
-		flat: '#8c6a52',
-		glsl: `
+		get flat() {
+			return colour('dirt');
+		},
+		get glsl() {
+			return `
 	float n = 0.5 * perlin(world * 0.5) + 0.3 * perlin(world * 1.2) + 0.2 * perlin(world * 2.6) + 0.12 * perlin(world * 6.0) + 0.08 * perlin(world * 14.0);
-	vec3 color = mix(vec3(130.0, 98.0, 74.0), vec3(150.0, 114.0, 86.0), clamp(n * 0.9 + 0.5, 0.0, 1.0)) / 255.0;
+	vec3 color = mix(${vec3(colour('dirt-low'))}, ${vec3(colour('dirt-high'))}, clamp(n * 0.9 + 0.5, 0.0, 1.0));
 	float specks = 1e9;
 	vec2 cell = floor(world / 0.1);
 	for (int y = -1; y <= 1; y++) {
@@ -131,11 +159,15 @@ export const BASES: Record<string, Base> = {
 		}
 	}
 	float aa = fwidth(specks);
-	return mix(vec3(98.0, 70.0, 54.0) / 255.0, color, smoothstep(-aa, aa, specks));`
+	return mix(${vec3(colour('dirt-speck'))}, color, smoothstep(-aa, aa, specks));`;
+		}
 	},
 	ocean: {
-		flat: '#3d8cc4',
-		glsl: `
+		get flat() {
+			return colour('ocean');
+		},
+		get glsl() {
+			return `
 	vec2 at = world;
 	float r2 = dot(local, local);
 	if (g_rock && r2 > 0.0) at += mix(local * vec2(0.16, -0.16) / max(r2, 0.09), vec2(0.0), smoothstep(0.45, 0.85, sqrt(r2)));
@@ -143,7 +175,8 @@ export const BASES: Record<string, Base> = {
 	float n = perlin(p + u_time * vec2(0.06, 0.025) + perlin(p * 0.5 - u_time * vec2(0.02, 0.03)) * 0.6);
 	if (g_rock) n = max(n, 0.36 + 0.05 * sin(u_time * 0.6 + atan(local.y, local.x) * 3.0) - sqrt(r2));
 	float aa = fwidth(n);
-	return mix(vec3(58.0, 134.0, 192.0), vec3(78.0, 158.0, 210.0), smoothstep(0.05 - aa, 0.05 + aa, n)) / 255.0;`
+	return mix(${vec3(colour('ocean-deep'))}, ${vec3(colour('ocean-light'))}, smoothstep(0.05 - aa, 0.05 + aa, n));`;
+		}
 	}
 };
 
