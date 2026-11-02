@@ -3,6 +3,7 @@
 	import { amount, describe } from '#lib/effects.js';
 	import { MAP, legible, rgb } from '#lib/colors.js';
 	import { CONTOUR, FOG_STRIDE, HIDDEN, MARK, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, look, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
+	import { raise } from '#lib/range.js';
 	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
 	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, aim, confine, frame, grid, middle, projector, unprojector, type Plane } from '#lib/view.js';
 	import { untrack } from 'svelte';
@@ -273,13 +274,14 @@
 	function edges(hex: PlacedTile) {
 		const { tile, row, col } = hex;
 		const mine = tile.variants.includes('mine');
+		const mountain = tile.variants.includes('mountain');
 		return neighbours(row, col).reduce((bits, [r, c], i) => {
 			const other = placed.get(`${r},${c}`);
 			const step = other ? tile.height - other.tile.height : Infinity;
 			const across = mine !== Boolean(other?.tile.variants.includes('mine'));
 			const front = occupied(hex) !== occupied(other);
 			const kind = step > LEVEL || (mine && across) ? CONTOUR : Math.abs(step) > LEVEL ? 0 : mine || across || front ? HIDDEN : THIN;
-			return bits | (kind << (2 * i));
+			return bits | ((mountain ? kind & 1 && HIDDEN : kind) << (2 * i));
 		}, 0);
 	}
 
@@ -390,6 +392,8 @@
 		});
 	}
 
+	const range = $derived(raise(tiles, placed));
+
 	const trees = $derived.by(() => {
 		const found: number[][] = [];
 		const pinned: number[][] = [];
@@ -398,8 +402,7 @@
 				found.push([x, y, tile.height * LIFT, 0.6 + hash(col, row, 5) * 0.2, hash(col, row, 6), ROCK, y]);
 				found.push([x + (hash(col, row, 7) - 0.5) * 0.6, y + 0.2 + hash(col, row, 8) * 0.2, tile.height * LIFT, 0.25 + hash(col, row, 9) * 0.1, hash(col, row, 10), ROCK, y]);
 			}
-			if (tile.variants.includes('mountain')) found.push([x, y + 0.4, tile.height * LIFT, 0.9, hash(col, row, 12), sprite('mountain'), y]);
-			if (tile.variants.includes('camp')) pinned.push([x, y + 0.1, tile.height * LIFT, 1, 0, sprite('camp'), y]);
+			if (tile.variants.includes('outpost')) pinned.push([x, y + 0.1, tile.height * LIFT, 1, 0, sprite('outpost'), y]);
 			if (tile.variants.includes('cactus')) {
 				const count = 2 + Math.floor(hash(col, row, 30) * 2);
 				for (let k = 0; k < count; k++) {
@@ -755,6 +758,7 @@
 		const data = instances;
 		const gl = (painter ??= renderer(surface) ?? fallback(surface));
 		gl.plant(trees);
+		gl.raise(range);
 		gl.shroud(clouds);
 		gl.pave(ramps);
 

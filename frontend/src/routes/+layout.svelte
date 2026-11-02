@@ -9,6 +9,12 @@
 			.map((key) => `--${key}: ${colour(key)};`)
 			.join(' ')
 	);
+
+	$effect(() => {
+		try {
+			localStorage.setItem('background', colour('background'));
+		} catch {}
+	});
 </script>
 
 <svelte:head>

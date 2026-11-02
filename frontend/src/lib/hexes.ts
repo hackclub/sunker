@@ -13,9 +13,9 @@ export const RAMP_STRIDE = 12;
 export const FOG_STRIDE = 4;
 export const MARK = 10;
 export const ROCK = 1;
+export const RANGE_STRIDE = 8;
 
 const SPRITES = [
-	{ name: 'mountain', size: [256, 256], anchor: [112, 200], unit: 1.9 / 256, flat: true },
 	{ name: 'building1', size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
 	{ name: 'building2', size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
 	{ name: 'house1', size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
@@ -25,10 +25,11 @@ const SPRITES = [
 	{ name: 'chunker', size: [128, 128], anchor: [66, 124], unit: 0.011, flat: false },
 	{ name: 'crawler', size: [128, 128], anchor: [62, 112], unit: 0.0055, flat: false },
 	{ name: 'hopper', size: [128, 128], anchor: [66, 110], unit: 0.0055, flat: false },
-	{ name: 'camp', size: [128, 128], anchor: [62, 102], unit: 0.016, flat: false }
+	{ name: 'outpost', size: [128, 128], anchor: [62, 102], unit: 0.016, flat: false }
 ] as const;
 export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
 const TREE = sprite('tree1');
+const OUTPOST = sprite('outpost');
 
 const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker', 'origin'];
 const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
@@ -62,6 +63,7 @@ export interface Renderer {
 	animated: boolean;
 	resize(screen: Screen, plane: Plane, camera: Camera): void;
 	plant(trees: Float32Array): void;
+	raise(range: Float32Array): void;
 	pave(ramps: Float32Array): void;
 	shroud(clouds: Float32Array): void;
 	fill(data: Float32Array): void;
@@ -506,7 +508,7 @@ flat out float v_kind;
 void main() {
 	vec2 root = i_root.xy - vec2(0.0, i_root.z);
 	if (u_shadow > 0.5) {
-		gl_Position = i_tree.z > 0.5 && i_tree.z < ${TREE - 0.5} ? vec4(0.0) : project(root + a_corner * vec2(0.26, 0.1) * i_tree.x);
+		gl_Position = i_tree.z > 0.5 && i_tree.z < ${TREE - 0.5} || abs(i_tree.z - ${OUTPOST}.0) < 0.5 ? vec4(0.0) : project(root + a_corner * vec2(0.26, 0.1) * i_tree.x);
 		v_offset = a_corner;
 	} else {
 		vec2 uv = vec2(a_corner.x * 0.5 + 0.5, 0.5 - a_corner.y * 0.5);
@@ -573,6 +575,25 @@ ${SPRITES.map((_, k) => `		if (sprite == ${k}) color = texture(u_sprites[${k}], 
 		return;
 	}
 	color = rock(v_offset, v_seed);
+}`;
+
+const RANGE_VERTEX = `#version 300 es
+in vec3 a_point;
+in float a_depth;
+in vec4 a_colour;
+${PROJECT}
+out vec4 v_colour;
+void main() {
+	gl_Position = layer(project(a_point.xy - vec2(0.0, a_point.z)), a_depth, OVERLAY);
+	v_colour = a_colour;
+}`;
+
+const RANGE_FRAGMENT = `#version 300 es
+precision highp float;
+in vec4 v_colour;
+out vec4 color;
+void main() {
+	color = v_colour;
 }`;
 
 const FOG_VERTEX = `#version 300 es
@@ -679,7 +700,8 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	const forest = link(gl, TREE_VERTEX(), TREE_FRAGMENT());
 	const asphalt = link(gl, RAMP_VERTEX, RAMP_FRAGMENT());
 	const mist = link(gl, FOG_VERTEX, FOG_FRAGMENT());
-	if (!program || !forest || !asphalt || !mist) return null;
+	const ridge = link(gl, RANGE_VERTEX, RANGE_FRAGMENT);
+	if (!program || !forest || !asphalt || !mist || !ridge) return null;
 
 	const shape = template();
 	const vao = gl.createVertexArray();
@@ -723,6 +745,15 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('i_tree', 3, TREE_STRIDE, 3, 1, forest);
 	attribute('i_tile', 1, TREE_STRIDE, 6, 1, forest);
 	let planted = 0;
+
+	const crags = gl.createVertexArray();
+	gl.bindVertexArray(crags);
+	const range = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, range);
+	attribute('a_point', 3, RANGE_STRIDE, 0, 0, ridge);
+	attribute('a_depth', 1, RANGE_STRIDE, 3, 0, ridge);
+	attribute('a_colour', 4, RANGE_STRIDE, 4, 0, ridge);
+	let raised = 0;
 
 	const road = gl.createVertexArray();
 	gl.bindVertexArray(road);
@@ -783,7 +814,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	gl.clearColor(...(rgb(MAP.background) as [number, number, number]), 1);
 
 	const uniforms = (set: (uniform: (name: string) => WebGLUniformLocation | null) => void) => {
-		for (const each of [program, forest, asphalt, mist]) {
+		for (const each of [program, forest, asphalt, mist, ridge]) {
 			gl.useProgram(each);
 			set((name) => gl.getUniformLocation(each, name));
 		}
@@ -811,6 +842,11 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bindBuffer(gl.ARRAY_BUFFER, trees);
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 			planted = data.length / TREE_STRIDE;
+		},
+		raise(data) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, range);
+			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+			raised = data.length / RANGE_STRIDE;
 		},
 		pave(data) {
 			gl.bindBuffer(gl.ARRAY_BUFFER, ramps);
@@ -861,6 +897,13 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 				gl.uniform1f(paint, 1);
 				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, paved);
 			}
+			if (raised) {
+				gl.depthMask(true);
+				gl.useProgram(ridge);
+				gl.bindVertexArray(crags);
+				gl.drawArrays(gl.TRIANGLES, 0, raised);
+				gl.depthMask(false);
+			}
 			if (planted) {
 				gl.useProgram(forest);
 				gl.uniform1f(gl.getUniformLocation(forest, 'u_time'), time);
@@ -904,6 +947,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 	let stale = true;
 	let reach = 0;
 	let planted: Float32Array = new Float32Array();
+	let raised: Float32Array = new Float32Array();
 	let paved: Float32Array = new Float32Array();
 	let shrouded: Float32Array = new Float32Array();
 	let source: Float32Array | undefined;
@@ -1227,16 +1271,29 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 		}
 	};
 
-	const forest = () => {
+	const forest = (near?: number) => {
+		let face = 0;
+		const crags = (until: number) => {
+			for (; face < raised.length && raised[face + 3] + raised[face + RANGE_STRIDE + 3] + raised[face + RANGE_STRIDE * 2 + 3] <= until * 3; face += RANGE_STRIDE * 3) {
+				if (near !== undefined && Math.abs(raised[face] - near) > 1.5) continue;
+				context.beginPath();
+				for (let k = face; k < face + RANGE_STRIDE * 3; k += RANGE_STRIDE) context.lineTo(...project(raised[k], raised[k + 1] - raised[k + 2]));
+				context.closePath();
+				context.fillStyle = context.strokeStyle = `rgb(${raised[face + 4] * 255} ${raised[face + 5] * 255} ${raised[face + 6] * 255} / ${raised[face + 7]})`;
+				context.fill();
+				context.stroke();
+			}
+		};
 		for (let i = 0; i < planted.length; i += TREE_STRIDE) {
 			const [x, y, lift, size] = planted.subarray(i, i + 4);
-			if (planted[i + 5] > 0.5 && planted[i + 5] < TREE - 0.5) continue;
+			if ((planted[i + 5] > 0.5 && planted[i + 5] < TREE - 0.5) || planted[i + 5] === OUTPOST) continue;
 			path(Array.from({ length: 16 }, (_, k) => [x + Math.cos((k / 8) * Math.PI) * 0.2 * size, y - lift + Math.sin((k / 8) * Math.PI) * 0.08 * size]));
 			context.fillStyle = css(MAP.shadow, 0.2);
 			context.fill();
 		}
 		for (let i = 0; i < planted.length; i += TREE_STRIDE) {
 			const [x, y, lift, size, seed, kind] = planted.subarray(i, i + TREE_STRIDE);
+			crags(y);
 			const [rx, ry] = project(x, y - lift);
 			const span = (project(x + 1, y - lift)[0] - rx) * size;
 			if (kind > 1.5) {
@@ -1281,6 +1338,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				continue;
 			}
 		}
+		crags(Infinity);
 	};
 
 	const renderer: Renderer = {
@@ -1302,6 +1360,10 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 		},
 		plant(data) {
 			planted = data;
+			stale = true;
+		},
+		raise(data) {
+			raised = data;
 			stale = true;
 		},
 		pave(data) {
@@ -1364,7 +1426,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 					if (data[o + 1] - reach - 1 > y + 1) break;
 					if (Math.abs(data[o] - x) < WIDTH) hex(data, j, true);
 				}
-				forest();
+				forest(x);
 				clouds();
 				context.restore();
 			}
