@@ -15,6 +15,7 @@
 	import Operations from '#lib/hq/Operations.svelte';
 	import { planner } from '#lib/hq/planner.svelte.js';
 	import Profile from '#lib/hq/Profile.svelte';
+	import Resources from '#lib/hq/Resources.svelte';
 	import Konami from '#lib/Konami.svelte';
 	import Robosquirrel from '#lib/onboarding/Robosquirrel.svelte';
 	import Speech from '#lib/onboarding/Speech.svelte';
@@ -449,6 +450,7 @@
 	</div>
 
 	<button class="help" class:spotlit={current?.spots.includes('Help')} aria-label="Help"><img src={image('help-icon')} alt="" /><span class="tip left">Help</span></button>
+	<Resources />
 
 	<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
 	{#if shown && docked}

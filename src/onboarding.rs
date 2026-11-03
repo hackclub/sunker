@@ -42,7 +42,14 @@ pub async fn me(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
             "SELECT jsonb_build_object(
                  'stage', u.onboarding_step,
                  'character', (SELECT jsonb_build_object('handle', c.handle, 'attributes', c.attributes) FROM character c WHERE c.user_id = u.id),
-                 'guild', (SELECT jsonb_build_object('slug', g.slug, 'name', g.name) FROM guild g WHERE g.id = u.guild_id)
+                 'guild', (SELECT jsonb_build_object('slug', g.slug, 'name', g.name) FROM guild g WHERE g.id = u.guild_id),
+                 'resources', (SELECT jsonb_build_object(
+                     'chiprock', coalesce(sum(l.chiprock), 0), 'granite', coalesce(sum(l.granite), 0),
+                     'potash', coalesce(sum(l.potash), 0), 'bauxite', coalesce(sum(l.bauxite), 0),
+                     'shale', coalesce(sum(l.shale), 0), 'kalkite', coalesce(sum(l.kalkite), 0),
+                     'cuprite', coalesce(sum(l.cuprite), 0), 'ring_upgrade', coalesce(sum(l.ring_upgrade), 0),
+                     'scrip', coalesce(sum(l.scrip), 0)
+                 ) FROM resource_ledger l WHERE l.user_id = u.id)
              ) FROM \"user\" u WHERE u.id = $1",
         )
         .bind(user)

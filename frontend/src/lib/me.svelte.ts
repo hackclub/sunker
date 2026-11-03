@@ -3,7 +3,7 @@ export type Attributes = { age: string; occupation: string; backstory: string; f
 export type Character = { handle: string; attributes: Attributes };
 export type Guild = { slug: string; name: string };
 export type Stage = null | 'passport' | 'guild' | 'hq' | 'done';
-export type Me = { stage: Stage; superadmin: boolean; character: Character | null; guild: Guild | null };
+export type Me = { stage: Stage; superadmin: boolean; character: Character | null; guild: Guild | null; resources: Record<string, number> };
 
 export const me = $state<{ current: Me | null }>({ current: null });
 
