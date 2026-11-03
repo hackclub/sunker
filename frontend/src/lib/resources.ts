@@ -7,5 +7,5 @@ export const RESOURCES = [
 	{ key: 'kalkite', icon: 'kalkite', name: 'Kalkite', description: 'Needed to take on the big Dyconids' },
 	{ key: 'cuprite', icon: 'cuprite', name: 'Cuprite', description: "Cuts an operation's costs by 25%, and each one stacks" },
 	{ key: 'ring_upgrade', icon: 'ring-upgrade', name: 'Ring Upgrade', description: 'Upgrades the ring of a project' },
-	{ key: 'scrip', icon: 'scrip', name: 'Scrip', description: 'Redeemed for others' }
+	{ key: 'scrip', icon: 'scrip', name: 'Scrip', description: 'Redeemed for other resources' }
 ];
