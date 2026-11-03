@@ -172,6 +172,7 @@ async fn main() -> std::io::Result<()> {
                 styling::save_slot,
                 styling::remove_slot,
                 styling::set_colour,
+                styling::import,
                 styling::progress,
             ))
             .service((chats::list, chats::messages, chats::create, chats::flag))

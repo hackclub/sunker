@@ -105,6 +105,36 @@ fn size(body: &Value, key: &str) -> Result<Option<i32>, HttpResponse> {
     }
 }
 
+fn slot_fields(body: &Value) -> Result<(&str, &str, Option<i32>, Option<i32>), HttpResponse> {
+    let name = body["name"].as_str().unwrap_or_default().trim();
+    let brief = body["brief"].as_str().unwrap_or_default().trim();
+    if name.is_empty() || name.chars().count() > 60 || brief.chars().count() > 2000 {
+        return Err(HttpResponse::BadRequest().body("Names are up to 60 characters and briefs up to 2000"));
+    }
+    Ok((name, brief, size(body, "width")?, size(body, "height")?))
+}
+
+fn colour_value(value: &Value) -> Result<Option<String>, HttpResponse> {
+    match value {
+        Value::Null => Ok(None),
+        Value::String(value) if hex(value) => Ok(Some(value.to_lowercase())),
+        _ => Err(HttpResponse::BadRequest().body("Colours look like #rrggbb or #rrggbbaa")),
+    }
+}
+
+async fn apply_colour(tx: &mut Transaction<'_, Postgres>, admin: i32, key: &str, value: &Option<String>) -> sqlx::Result<()> {
+    sqlx::query("UPDATE colour SET active = false WHERE key = $1 AND active").bind(key).execute(&mut **tx).await?;
+    if let Some(value) = value {
+        sqlx::query("INSERT INTO colour (key, value, active, set_by) VALUES ($1, $2, true, $3)")
+            .bind(key)
+            .bind(value)
+            .bind(admin)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
 async fn log(tx: &mut Transaction<'_, Postgres>, admin: i32, action: &str, summary: String) -> sqlx::Result<()> {
     sqlx::query("INSERT INTO admin_action (admin_id, action, summary) VALUES ($1, $2, $3)")
         .bind(admin)
@@ -464,14 +494,9 @@ pub async fn save_slot(req: HttpRequest, slug: web::Path<String>, body: web::Jso
         Ok(admin) => admin,
         Err(response) => return response,
     };
-    let name = body["name"].as_str().unwrap_or_default().trim();
-    let brief = body["brief"].as_str().unwrap_or_default().trim();
-    if name.is_empty() || name.chars().count() > 60 || brief.chars().count() > 2000 {
-        return HttpResponse::BadRequest().body("Names are up to 60 characters and briefs up to 2000");
-    }
-    let (width, height) = match (size(&body, "width"), size(&body, "height")) {
-        (Ok(width), Ok(height)) => (width, height),
-        (Err(response), _) | (_, Err(response)) => return response,
+    let (name, brief, width, height) = match slot_fields(&body) {
+        Ok(fields) => fields,
+        Err(response) => return response,
     };
     let outcome: Outcome = async {
         let mut tx = pool.begin().await?;
@@ -524,22 +549,13 @@ pub async fn set_colour(req: HttpRequest, key: web::Path<String>, body: web::Jso
     if !colour_key(&key) {
         return HttpResponse::BadRequest().body("That isn't a colour");
     }
-    let value = match &body["value"] {
-        Value::Null => None,
-        Value::String(value) if hex(value) => Some(value.to_lowercase()),
-        _ => return HttpResponse::BadRequest().body("Colours look like #rrggbb or #rrggbbaa"),
+    let value = match colour_value(&body["value"]) {
+        Ok(value) => value,
+        Err(response) => return response,
     };
     let outcome: Outcome = async {
         let mut tx = pool.begin().await?;
-        sqlx::query("UPDATE colour SET active = false WHERE key = $1 AND active").bind(key.as_str()).execute(&mut *tx).await?;
-        if let Some(value) = &value {
-            sqlx::query("INSERT INTO colour (key, value, active, set_by) VALUES ($1, $2, true, $3)")
-                .bind(key.as_str())
-                .bind(value)
-                .bind(admin.id)
-                .execute(&mut *tx)
-                .await?;
-        }
+        apply_colour(&mut tx, admin.id, &key, &value).await?;
         let summary = match &value {
             Some(value) => format!("Set the {key} colour to {value}"),
             None => format!("Reset the {key} colour to its default"),
@@ -550,6 +566,60 @@ pub async fn set_colour(req: HttpRequest, key: web::Path<String>, body: web::Jso
     }
     .await;
     done(&pool, "setting a colour", outcome).await
+}
+
+#[post("/api/admin/styling/import")]
+pub async fn import(req: HttpRequest, body: web::Json<Value>, pool: web::Data<PgPool>) -> HttpResponse {
+    let admin = match admin::require(&req, &pool, Permission::Styling).await {
+        Ok(admin) => admin,
+        Err(response) => return response,
+    };
+    let mut colours = Vec::new();
+    for (key, value) in body["colours"].as_object().into_iter().flatten() {
+        if !colour_key(key) {
+            return HttpResponse::BadRequest().body(format!("{key} isn't a colour"));
+        }
+        match colour_value(value) {
+            Ok(value) => colours.push((key.as_str(), value)),
+            Err(response) => return response,
+        }
+    }
+    let mut slots = Vec::new();
+    for slot in body["slots"].as_array().into_iter().flatten() {
+        let slug = slot["slug"].as_str().unwrap_or_default();
+        if !colour_key(slug) {
+            return HttpResponse::BadRequest().body(format!("{slug} isn't an image name"));
+        }
+        match slot_fields(slot) {
+            Ok(fields) => slots.push((slug, fields)),
+            Err(response) => return response,
+        }
+    }
+    let outcome: Outcome = async {
+        let mut tx = pool.begin().await?;
+        for (key, value) in &colours {
+            apply_colour(&mut tx, admin.id, key, value).await?;
+        }
+        for (slug, (name, brief, width, height)) in &slots {
+            sqlx::query(
+                "INSERT INTO image_slot (slug, name, brief, width, height, declared_by) VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (slug) DO UPDATE SET name = $2, brief = $3, width = $4, height = $5",
+            )
+            .bind(slug)
+            .bind(name)
+            .bind(brief)
+            .bind(width)
+            .bind(height)
+            .bind(admin.id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        log(&mut tx, admin.id, "styling_import", format!("Loaded {} colours and {} image briefs from a file", colours.len(), slots.len())).await?;
+        tx.commit().await?;
+        Ok(Ok(()))
+    }
+    .await;
+    done(&pool, "loading styling from a file", outcome).await
 }
 
 #[put("/api/admin/styling/progress")]

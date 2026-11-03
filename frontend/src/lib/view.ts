@@ -111,11 +111,6 @@ export function table(tiles: PlacedTile[], width: number, height: number) {
 	return `translateY(${-rise}px) scale(${scale}, ${scale * FLATTEN})`;
 }
 
-export function squash(tiles: PlacedTile[], width: number, height: number): [number, number] {
-	const { scale } = placement(tiles, width, height);
-	return [scale, scale * FLATTEN];
-}
-
 function seat(tiles: PlacedTile[], width: number, height: number) {
 	const { scale, rise } = placement(tiles, width, height);
 	return ([x, y]: Point): Point => [width / 2 + (x - width / 2) * scale, height / 2 + (y - height / 2) * scale * FLATTEN - rise];
@@ -167,7 +162,7 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 	const plane = frame(tiles, width, height);
 	const project = projector(plane, width, height);
 	const { rows, cols } = grid(plane, width, height);
-	const lift = floor(tiles) / 2;
+	const lift = floor(tiles);
 	const distance = new Map(tiles.map((t) => [`${t.row},${t.col}`, 0]));
 	const queue = tiles.map((t) => [t.row, t.col]);
 	for (const [row, col] of queue) {

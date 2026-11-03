@@ -126,6 +126,41 @@
 	const setColour = (key: string, value: string | null) => act(() => request('PUT', `/api/admin/styling/colours/${key}`, { value }), 'colours');
 	const mark = (slug: string) => act(() => request('PUT', '/api/admin/styling/progress', { key: slug, completed: !done(slug) }));
 
+	function save() {
+		const file = {
+			colours: Object.fromEntries(Object.keys(DEFAULTS).map((key) => [key, current(key)])),
+			slots: styling!.slots.map(({ slug, name, brief, width, height }) => ({ slug, name, brief, width, height }))
+		};
+		const link = document.createElement('a');
+		link.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, '\t')], { type: 'application/json' }));
+		link.download = 'styling.json';
+		link.click();
+		URL.revokeObjectURL(link.href);
+	}
+
+	async function restore(file: File | undefined) {
+		if (!file || !styling) return;
+		let data: { colours?: Record<string, string>; slots?: Pick<Slot, 'slug' | 'name' | 'brief' | 'width' | 'height'>[] };
+		try {
+			data = JSON.parse(await file.text());
+		} catch {
+			scope = 'images';
+			error = "That file isn't valid JSON";
+			return;
+		}
+		const colours = Object.fromEntries(
+			Object.entries(data.colours ?? {})
+				.map(([key, value]) => [key, String(value).toLowerCase()])
+				.filter(([key, value]) => key in DEFAULTS && value !== current(key))
+				.map(([key, value]) => [key, value === DEFAULTS[key] ? null : value])
+		);
+		const slots = (data.slots ?? []).filter((s) => {
+			const old = styling!.slots.find((o) => o.slug === s.slug);
+			return !old || old.name !== s.name || old.brief !== s.brief || old.width !== s.width || old.height !== s.height;
+		});
+		if (Object.keys(colours).length || slots.length) act(() => request('POST', '/api/admin/styling/import', { colours, slots }));
+	}
+
 	function typed(key: string, input: HTMLInputElement) {
 		const value = input.value.trim().toLowerCase();
 		const alpha = DEFAULTS[key].length === 9;
@@ -149,6 +184,11 @@
 			<h1>Styling</h1>
 			<Segmented options={FILTERS} value={filter} label="Filter" onchange={(value) => (filter = value)} />
 			<input class="search" type="search" placeholder="Search images" bind:value={search} />
+			<button class="button" disabled={!styling} onclick={save}>Save JSON</button>
+			<label class="button upload" class:disabled={busy || !styling}>
+				Load JSON
+				<input type="file" accept="application/json,.json" disabled={busy || !styling} onchange={(event) => (restore(event.currentTarget.files?.[0]), (event.currentTarget.value = ''))} />
+			</label>
 			<button class="button primary" onclick={() => (declaring = { name: '', count: 1, brief: '', width: null, height: null })}>Declare image</button>
 		</header>
 

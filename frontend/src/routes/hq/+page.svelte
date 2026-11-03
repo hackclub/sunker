@@ -7,7 +7,7 @@
 	import { params, update } from '#lib/url.svelte.js';
 	import { page } from '$app/state';
 	import { place, type PlacedTile } from '#lib/map.js';
-	import { FLIGHT, crest, footprint, halo, inside, island, reveal, squash, table as tabled } from '#lib/view.js';
+	import { FLIGHT, crest, footprint, halo, inside, island, reveal, table as tabled } from '#lib/view.js';
 	import Projects from '#lib/hq/Projects.svelte';
 	import Propaganda from '#lib/hq/Propaganda.svelte';
 	import Help from '#lib/hq/Help.svelte';
@@ -127,11 +127,6 @@
 	const mining = $derived(params().has('mines'));
 	let settled = page.url.searchParams.has('map');
 	let docked = $state(!settled);
-	const detail = $derived.by((): [number, number] => {
-		if (!docked) return [1, 1];
-		const [x, y] = squash(tiles, innerWidth, innerHeight);
-		return [Math.min(1, 2 * x), Math.min(1, 2 * y)];
-	});
 	let flight: HTMLElement;
 	let animations: Animation[] = [];
 	let keyframes: ReturnType<typeof reveal> | undefined;
@@ -178,8 +173,16 @@
 
 	async function fly(opening: boolean) {
 		if (opening) docked = false;
-		if (animations.length) animations.forEach((animation) => (animation.playbackRate = -animation.playbackRate));
-		else {
+		if (animations.length) {
+			const now = performance.now();
+			animations.forEach((animation) => {
+				const start = animation.startTime;
+				animation.playbackRate = -animation.playbackRate;
+				if (start === null) return;
+				const at = Math.max(0, Math.min(FLIGHT, (now - Number(start)) * -animation.playbackRate));
+				animation.startTime = now - at / animation.playbackRate;
+			});
+		} else {
 			const { grow, spread } = keyframes ?? reveal(tiles, innerWidth, innerHeight);
 			const options: KeyframeAnimationOptions = { duration: FLIGHT, fill: 'both', direction: opening ? 'normal' : 'reverse' };
 			animations = [flight.animate(grow, options), flight.animate(spread, options)];
@@ -373,7 +376,9 @@
 				<header class={side}>
 					<h2>{section.label}</h2>
 					<button class="close" aria-label="Close" onclick={() => update({ [side]: null })}>
-						<img src={image('x-icon')} alt="" />
+						<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+							<path d="M2 2L12 12M12 2L2 12" />
+						</svg>
 					</button>
 				</header>
 				<div class="body"><section.component /></div>
@@ -408,7 +413,6 @@
 			territory={data.territory}
 			table={!wanted}
 			arrows={!mining}
-			{detail}
 			selectable={planner.selectable}
 			selected={planner.selected}
 			route={planner.path}
@@ -515,9 +519,10 @@
 		border-radius: 6px;
 	}
 
-	.close img {
-		width: 24px;
-		height: 24px;
+	.close path {
+		stroke: var(--text-muted);
+		stroke-width: 1.5;
+		stroke-linecap: round;
 	}
 
 	.body {

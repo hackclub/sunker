@@ -14,7 +14,6 @@
 		territory = [],
 		table = false,
 		arrows = true,
-		detail = [1, 1],
 		selectable = null,
 		selected = null,
 		route = null,
@@ -25,7 +24,6 @@
 		territory?: Territory[];
 		table?: boolean;
 		arrows?: boolean;
-		detail?: [number, number];
 		selectable?: [number, number][] | null;
 		selected?: [number, number] | null;
 		route?: [number, number][] | null;
@@ -50,7 +48,8 @@
 	let ratio = $state(1);
 	let canvas: HTMLCanvasElement = $state()!;
 	let element: HTMLDivElement;
-	let painter: Renderer | undefined;
+	let painter = $state.raw<Renderer>();
+	let stale = true;
 	let restored = $state(0);
 	let hovered = $state.raw<PlacedTile | null>(null);
 	let region = $state<string | null>(null);
@@ -725,6 +724,22 @@
 		};
 	});
 
+	$effect(() => {
+		restored;
+		const surface = canvas;
+		untrack(() => (painter ??= renderer(surface) ?? fallback(surface)));
+	});
+
+	$effect(() => {
+		const gl = painter;
+		if (!gl) return;
+		gl.plant(trees);
+		gl.raise(range);
+		gl.shroud(clouds);
+		gl.pave(ramps);
+		stale = true;
+	});
+
 	const instances = $derived.by(() => {
 		const top = ceiling;
 		const blank = [...rgb(MAP.background), 0.03];
@@ -751,16 +766,11 @@
 	});
 
 	$effect(() => {
-		restored;
-		const surface = canvas;
-		const screen = { width: innerWidth, height: innerHeight, ratio: [ratio * detail[0], ratio * detail[1]] as [number, number] };
+		const gl = painter;
+		if (!gl) return;
+		const screen = { width: innerWidth, height: innerHeight, ratio: [ratio, ratio] as [number, number] };
 		const hexes = field;
 		const data = instances;
-		const gl = (painter ??= renderer(surface) ?? fallback(surface));
-		gl.plant(trees);
-		gl.raise(range);
-		gl.shroud(clouds);
-		gl.pave(ramps);
 
 		let frame = 0;
 		let drawn: PlacedTile | string | null | undefined;
@@ -773,7 +783,8 @@
 			const marks = choosable;
 			const chosen = selected && `${selected[0]},${selected[1]}`;
 			const restamp = stamped?.[0] !== marks || stamped[1] !== chosen;
-			if (!gl.animated && drawn === target && shown === view && !restamp) return;
+			if (!stale && !(gl.animated && marks.size) && drawn === target && shown === view && !restamp) return;
+			stale = false;
 			if (shown !== view) {
 				shown = view;
 				const { width, height, scale, x, y } = view;

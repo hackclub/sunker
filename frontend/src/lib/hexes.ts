@@ -67,7 +67,7 @@ export interface Renderer {
 	pave(ramps: Float32Array): void;
 	shroud(clouds: Float32Array): void;
 	fill(data: Float32Array): void;
-	draw(time?: number): void;
+	draw(pulse?: number): void;
 	destroy(): void;
 }
 
@@ -160,6 +160,7 @@ const DISPATCH = NAMES.map((_, i) => `\tif (id < ${i + 1.5}) return base_${i}(wo
 
 const FRAGMENT = () => `#version 300 es
 precision highp float;
+uniform float u_pulse;
 in vec2 v_local;
 in float v_kind;
 in float v_along;
@@ -393,7 +394,7 @@ void main() {
 		if (v_mark > 1.5) rgb = mix(mix(rgb, HIGHLIGHT, 0.35), HIGHLIGHT, 1.0 - smoothstep(0.12 - aa, 0.12 + aa, edge));
 		else if (v_mark > 0.5) {
 			for (int k = 0; k < 2; k++) {
-				float r = 1.0 - fract(u_time * 0.6 + float(k) * 0.5);
+				float r = 1.0 - fract(u_pulse * 0.6 + float(k) * 0.5);
 				rgb = mix(rgb, WHITE, (1.0 - smoothstep(0.025 - aa, 0.025 + aa, abs(edge - 0.8660254 * (1.0 - r)))) * r * 0.8);
 			}
 			rgb = mix(rgb, WHITE, 1.0 - smoothstep(0.1 - aa, 0.1 + aa, edge));
@@ -680,7 +681,7 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string) {
 	return shader;
 }
 
-function link(gl: WebGL2RenderingContext, vertex: string, fragment: string) {
+export function link(gl: WebGL2RenderingContext, vertex: string, fragment: string) {
 	const program = gl.createProgram();
 	gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, vertex));
 	gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragment));
@@ -803,6 +804,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			self.draw();
 		};
 		sprite.src = image(name);
 	});
@@ -820,7 +822,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 		}
 	};
 
-	return {
+	const self: Renderer = {
 		animated: true,
 		resize(screen, plane, camera) {
 			const [width, height] = [Math.round(screen.width * screen.ratio[0]), Math.round(screen.height * screen.ratio[1])];
@@ -880,11 +882,11 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
 			count = data.length / STRIDE;
 		},
-		draw(time = 0) {
+		draw(pulse = 0) {
 			gl.depthMask(true);
 			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 			gl.useProgram(program);
-			gl.uniform1f(gl.getUniformLocation(program, 'u_time'), time);
+			gl.uniform1f(gl.getUniformLocation(program, 'u_pulse'), pulse);
 			gl.bindVertexArray(vao);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, shape.length / 5, count);
 			gl.depthMask(false);
@@ -906,7 +908,6 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			}
 			if (planted) {
 				gl.useProgram(forest);
-				gl.uniform1f(gl.getUniformLocation(forest, 'u_time'), time);
 				gl.bindVertexArray(grove);
 				const shadow = gl.getUniformLocation(forest, 'u_shadow');
 				for (const pass of [1, 0]) {
@@ -917,7 +918,6 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			if (!shrouded) return;
 			gl.disable(gl.DEPTH_TEST);
 			gl.useProgram(mist);
-			gl.uniform1f(gl.getUniformLocation(mist, 'u_time'), time);
 			gl.bindVertexArray(fog);
 			gl.drawArrays(gl.TRIANGLES, 0, 6);
 			gl.enable(gl.DEPTH_TEST);
@@ -926,6 +926,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.getExtension('WEBGL_lose_context')?.loseContext();
 		}
 	};
+	return self;
 }
 
 function noise(x: number, y: number) {

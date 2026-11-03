@@ -11,21 +11,24 @@
 	const SHARP = 3;
 	const FRAMES = 4;
 	let mixed: { key: string; dirt: number[]; gray: number[] } | undefined;
-	const tint = (light: number, depth = 0, alpha = 1) => {
+	const shade = (light: number, depth = 0) => {
 		const key = BASES.dirt.flat + colour('mines-depth');
 		if (mixed?.key !== key) mixed = { key, dirt: rgb(BASES.dirt.flat), gray: rgb(colour('mines-depth')) };
 		const { dirt, gray } = mixed;
-		return `rgb(${dirt.map((c, i) => Math.round((Math.min(1, c * light) * (1 - depth) + gray[i] * depth) * 255)).join(' ')} / ${alpha})`;
+		return dirt.map((c, i) => Math.min(1, c * light) * (1 - depth) + gray[i] * depth);
 	};
+	const tint = (light: number, depth = 0, alpha = 1) => `rgb(${shade(light, depth).map((c) => Math.round(c * 255)).join(' ')} / ${alpha})`;
 
-	let baking: Promise<string[][]> | undefined;
-	let baked: string[][] | undefined;
+	let baking: Promise<HTMLCanvasElement[][]> | undefined;
+	let baked: HTMLCanvasElement[][] | undefined;
 	let bakedFor = '';
+	let encoding: Promise<string[][]> | undefined;
+	let encoded: HTMLCanvasElement[][] | undefined;
 
 	export function bake() {
 		const signature = tint(1, 0.5);
 		if (signature !== bakedFor) [baking, bakedFor] = [undefined, signature];
-		return (baking ??= document.fonts.load(FONT).then(async () => {
+		return (baking ??= document.fonts.load(FONT).then(() => {
 			let light = 0.62;
 			const rings = RING_CHARSETS.toReversed().map((set, i) => {
 				const pick = () => set[Math.floor(Math.random() * set.length)];
@@ -36,7 +39,7 @@
 					const [width, height] = [TILE[0] * CELL[0], TILE[1] * CELL[1]];
 					const canvas = document.createElement('canvas');
 					[canvas.width, canvas.height] = [width * SHARP, height * SHARP];
-					const context = canvas.getContext('2d')!;
+					const context = canvas.getContext('2d', { willReadFrequently: true })!;
 					context.scale(SHARP, SHARP);
 					const bands = context.createLinearGradient(0, 0, 0, height);
 					for (let k = 0; k <= BANDS * 2; k++) bands.addColorStop(k / (BANDS * 2), k % 2 ? bright : dark);
@@ -46,23 +49,32 @@
 					context.textBaseline = 'top';
 					context.fillStyle = color;
 					cells.forEach((cell, k) => context.fillText(cell, (k % TILE[0]) * CELL[0], Math.floor(k / TILE[0]) * CELL[1]));
-					return new Promise<string>((resolve) => canvas.toBlob((blob) => resolve(URL.createObjectURL(blob!))));
+					return canvas;
 				};
-				return Promise.all([draw(base), ...Array.from({ length: FRAMES }, () => draw(base.map((cell) => (Math.random() < CHURN ? pick() : cell))))]);
+				return [draw(base), ...Array.from({ length: FRAMES }, () => draw(base.map((cell) => (Math.random() < CHURN ? pick() : cell))))];
 			});
-			const urls = await Promise.all(rings);
-			await Promise.all(
-				urls.flat().map((url) => {
-					const image = new Image();
-					image.src = url;
-					return image.decode();
-				})
-			);
-			return (baked = urls.map((frames) => frames.map((url) => `url("${url}")`)).toReversed());
+			return (baked = rings.toReversed());
 		}).catch((e) => {
 			baking = undefined;
 			throw e;
 		}));
+	}
+
+	function encode(canvases: HTMLCanvasElement[][]) {
+		if (encoded !== canvases) [encoding, encoded] = [undefined, canvases];
+		return (encoding ??= Promise.all(
+			canvases.map((frames) =>
+				Promise.all(
+					frames.map(async (canvas) => {
+						const url = await new Promise<string>((resolve) => canvas.toBlob((blob) => resolve(URL.createObjectURL(blob!))));
+						const image = new Image();
+						image.src = url;
+						await image.decode();
+						return `url("${url}")`;
+					})
+				)
+			)
+		));
 	}
 </script>
 
@@ -78,6 +90,7 @@
 	import { load } from '#lib/projects.svelte.js';
 	import { image } from '#lib/styles.svelte.js';
 	import { params, update } from '#lib/url.svelte.js';
+	import { FLAT, GRADIENT, SPRITE, FACE, pit, type Call, type Pit } from '#lib/pit.js';
 
 	let { onback, onproject }: { onback: () => void; onproject: () => void } = $props();
 
@@ -115,6 +128,8 @@
 	const LEAVE = 250;
 	const SLICE = Math.tan(Math.PI / SIDES) * 2;
 	const CORNER = 1 / Math.cos(Math.PI / SIDES);
+	const SEGMENTS = 192;
+	const ASPECT = (TILE[0] * CELL[0]) / (TILE[1] * CELL[1]);
 
 	const ANGLES = Array.from({ length: SIDES }, (_, k) => (k * 360) / SIDES - 180);
 	const radians = (degrees: number) => (degrees * Math.PI) / 180;
@@ -135,19 +150,63 @@
 	const unit = $derived(Math.min(innerHeight, innerWidth * 0.75));
 	const perspective = $derived(PERSPECTIVE * innerHeight);
 
-	let textures = $state(baked ?? []);
+	let canvases = $state.raw(baked);
+	let textures = $state<string[][]>([]);
 	let tick = $state(0);
+	let gpu = $state(true);
+	let canvas = $state<HTMLCanvasElement>();
+	let painter = $state.raw<Pit>();
+	let aspects = $state<number[]>([]);
+	const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+	let rise = 0;
 
 	$effect(() => {
 		bake()
-			.then((drawn) => (textures = drawn))
+			.then((drawn) => (canvases = drawn))
 			.catch(() => {});
 	});
 
 	$effect(() => {
-		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (gpu || !canvases) return;
+		encode(canvases)
+			.then((urls) => (textures = urls))
+			.catch(() => {});
+	});
+
+	$effect(() => {
+		if (gpu || still) return;
 		const id = setInterval(() => tick++, STEP);
 		return () => clearInterval(id);
+	});
+
+	$effect(() => {
+		const surface = canvas;
+		if (!surface) return;
+		const gl = pit(surface, BANDS);
+		if (!gl) {
+			gpu = false;
+			return;
+		}
+		const lost = () => (gpu = false);
+		surface.addEventListener('webglcontextlost', lost);
+		painter = gl;
+		BUILDINGS.forEach((name, k) => {
+			const sprite = new Image();
+			sprite.onload = () => {
+				gl.sprite(k, sprite);
+				aspects[k] = sprite.naturalWidth / sprite.naturalHeight;
+			};
+			sprite.src = image(name);
+		});
+		return () => {
+			surface.removeEventListener('webglcontextlost', lost);
+			painter = undefined;
+			gl.destroy();
+		};
+	});
+
+	$effect(() => {
+		if (painter && canvases) painter.glyphs(canvases);
 	});
 
 	const phase = (ring: number) => (tick + ring) % 4;
@@ -177,6 +236,137 @@
 	});
 
 	const rim = $derived(annulus((RADIUS + RIM) * unit, RADIUS * unit - 1));
+
+	const scene = $derived.by(() => {
+		const data: number[] = [];
+		const calls: (Call & { ring?: number; lit?: number[] })[] = [];
+		const piece = (call: Omit<Call, 'first' | 'count'> & { ring?: number; lit?: number[] }, build: () => void) => {
+			const first = data.length / 5;
+			build();
+			calls.push({ ...call, first, count: data.length / 5 - first });
+		};
+		const quad = (...corners: number[][]) => [0, 1, 2, 0, 2, 3].forEach((k) => data.push(...corners[k]));
+		const plane = (matrix: DOMMatrix, [left, top, right, bottom]: number[]) => {
+			const corner = (x: number, y: number, u: number, v: number) => {
+				const { x: px, y: py, z: pz } = matrix.transformPoint({ x, y });
+				return [px, py, pz, u, v];
+			};
+			quad(corner(left, top, 0, 0), corner(right, top, 1, 0), corner(right, bottom, 1, 1), corner(left, bottom, 0, 1));
+		};
+		const ring = (y: number, inner: number, outer: number) => {
+			for (let k = 0; k < SEGMENTS; k++) {
+				const [a, b] = [k, k + 1].map((j) => (j / SEGMENTS) * Math.PI * 2);
+				quad([inner * Math.sin(a), y, inner * Math.cos(a), 0, 0], [outer * Math.sin(a), y, outer * Math.cos(a), 0, 0], [outer * Math.sin(b), y, outer * Math.cos(b), 0, 0], [inner * Math.sin(b), y, inner * Math.cos(b), 0, 0]);
+			}
+		};
+
+		const sky = new DOMMatrix(`rotateY(${YAW}deg) translateZ(${-SKY[2] * unit}px) translate(${(-SKY[0] * unit) / 2}px, ${-SKY[1] * unit}px)`);
+		piece({ kind: GRADIENT, colour: rgb(PALETTE.horizon), other: rgb(PALETTE.sky) }, () => plane(sky, [0, 0, SKY[0] * unit, SKY[1] * unit]));
+		TOWERS.forEach(([x, height], i) => {
+			const aspect = aspects[i % BUILDINGS.length];
+			if (!aspect) return;
+			const [middle, tall] = [(SKY[0] / 2 + x) * unit, height * unit];
+			piece({ kind: SPRITE, sprite: i % BUILDINGS.length }, () => plane(sky, [middle - (tall * aspect) / 2, SKY[1] * unit - tall, middle + (tall * aspect) / 2, SKY[1] * unit]));
+		});
+		piece({ kind: FLAT, colour: shade(1) }, () => ring(0, RADIUS * unit - 1, (RADIUS + RIM) * unit));
+
+		let light = 1;
+		terraces.forEach(({ ring: index, outer, inner, top, bottom }, i) => {
+			const wall = 0.62 * light;
+			light *= 0.86;
+			const [width, tall] = [outer * SLICE, bottom - top];
+			piece({ kind: FACE, ring: index, colour: shade(wall * 0.9, i / RING_COUNT), other: shade(wall * 1.1, i / RING_COUNT) }, () =>
+				ANGLES.forEach((angle) => {
+					const shift = ((angle * SIDES) / 360) * width;
+					const repeat = tall * ASPECT;
+					plane(new DOMMatrix(`translateY(${top}px) rotateY(${angle}deg) translateZ(${-outer}px) translate(${-width / 2}px, 0)`), [0, 0, width, tall]);
+					const corners = data.length - 30;
+					[0, 1, 2, 0, 2, 3].forEach((corner, k) => (data[corners + k * 5 + 3] = ((corner === 1 || corner === 2 ? width : 0) - shift) / repeat));
+				})
+			);
+			const last = i === RING_COUNT - 1;
+			piece({ kind: FLAT, ring: index, colour: shade(light, (i + 1) / RING_COUNT), lit: shade(light * 1.3, (i + 1) / RING_COUNT) }, () => ring(bottom, last ? 0 : inner, outer * CORNER + (last ? 2 : 1)));
+		});
+		return { data: new Float32Array(data), calls };
+	});
+
+	$effect(() => {
+		painter?.mesh(scene.data);
+	});
+
+	function matrix(depth: number) {
+		const [width, height, distance] = [innerWidth, innerHeight, perspective];
+		const [near, far] = [unit * 0.01, unit * 20];
+		const [x, y] = [(2 * 2) / 3 - 1, 1 - 2 * 0.62];
+		const [a, b] = [(far + near) / (far - near), (-2 * far * near) / (far - near)];
+		const projection = DOMMatrix.fromFloat32Array(new Float32Array([(2 * distance) / width, 0, 0, 0, 0, (-2 * distance) / height, 0, 0, -x, -y, -a, -1, x * distance, y * distance, a * distance + b, distance]));
+		return projection.multiply(new DOMMatrix(drone(depth)));
+	}
+
+	const depth = () => DEPTH - RISE * rise;
+
+	function pick(x: number, y: number) {
+		const inverse = matrix(depth()).inverse();
+		const [from, to] = [-1, 1].map((z) => {
+			const point = inverse.transformPoint({ x: (x / innerWidth) * 2 - 1, y: 1 - (y / innerHeight) * 2, z, w: 1 });
+			return [point.x / point.w, point.y / point.w, point.z / point.w];
+		});
+		const ray = to.map((value, k) => value - from[k]);
+		const camera = depth() * unit;
+		let best = Infinity;
+		let found = null as number | null;
+		const hit = (t: number, ring: number | null) => t > 0 && t < best && ((best = t), (found = ring));
+		const flat = (level: number, inner: number, outer: number, ring: number | null) => {
+			if (camera >= level || !ray[1]) return;
+			const t = (level - from[1]) / ray[1];
+			const r = Math.hypot(from[0] + ray[0] * t, from[2] + ray[2] * t);
+			if (r >= inner && r <= outer) hit(t, ring);
+		};
+		flat(0, RADIUS * unit - 1, (RADIUS + RIM) * unit, null);
+		terraces.forEach(({ ring, outer, inner, top, bottom }, i) => {
+			const last = i === RING_COUNT - 1;
+			flat(bottom, last ? 0 : inner, outer * CORNER + (last ? 2 : 1), ring);
+			const [a, b, c] = [ray[0] ** 2 + ray[2] ** 2, 2 * (from[0] * ray[0] + from[2] * ray[2]), from[0] ** 2 + from[2] ** 2 - outer ** 2];
+			const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
+			const level = from[1] + ray[1] * t;
+			if (level >= top && level <= bottom) hit(t, ring);
+		});
+		return found;
+	}
+
+	$effect(() => {
+		const gl = painter;
+		if (!gl) return;
+		const { calls } = scene;
+		const [width, height, ratio] = [innerWidth, innerHeight, devicePixelRatio];
+		const background = shade(0.45, 0.4);
+		const cut = [Math.sin(radians(YAW)), Math.cos(radians(YAW)), (FORWARD * Math.cos(radians(YAW)) - NEAR) * unit];
+		const start = performance.now();
+		const glyph = (ring: number, now: number) => {
+			const x = still ? 0 : (now - start) / STEP;
+			const tick = Math.floor(x);
+			const shown = (at: number) => (((at + ring) % 4) + 4) % 4 < 2 ? 1 : 0;
+			const f = still ? 1 : Math.min(1, ((x - tick) * STEP) / 700);
+			const eased = f * f * (3 - 2 * f);
+			const base = ring * (1 + FRAMES);
+			return [base, base + 1 + (Math.floor((tick + ring) / 4) % FRAMES), shown(tick - 1) + (shown(tick) - shown(tick - 1)) * eased];
+		};
+		let frame = requestAnimationFrame(function draw(now) {
+			frame = requestAnimationFrame(draw);
+			const level = depth();
+			gl.draw({
+				width,
+				height,
+				ratio,
+				view: matrix(level).toFloat32Array(),
+				camera: [0, level * unit, FORWARD * unit],
+				cut,
+				background,
+				calls: calls.map((call) => (call.kind === FACE ? { ...call, layers: glyph(call.ring!, now) } : call.lit && call.ring === hovered ? { ...call, colour: call.lit } : call))
+			});
+		});
+		return () => cancelAnimationFrame(frame);
+	});
 
 	let hovered = $state<number | null>(null);
 	let pointer = $state({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -249,65 +439,104 @@
 	function fly(_: Element, { back = false } = {}) {
 		return { duration: duration(back), easing: cubicOut, css: (t: number) => `transform: ${drone(DEPTH - RISE * (1 - t))}` };
 	}
+
+	function lift(_: Element, { back = false } = {}) {
+		return { duration: duration(back), easing: cubicOut, tick: (t: number) => (rise = 1 - t) };
+	}
+
+	function hover(event: PointerEvent) {
+		pointer = { x: event.clientX, y: event.clientY };
+		if (gpu) hovered = pick(event.clientX, event.clientY);
+	}
 </script>
 
 <svelte:window bind:innerWidth bind:innerHeight onkeydown={onescape} />
 
 <div class="mines" style:--pit={tint(0.45, 0.4)} style:--sky={PALETTE.sky} style:--horizon={PALETTE.horizon} transition:fade={{ duration: duration(false) / 2 }}>
-	<div class="stage" style:perspective="{perspective}px" role="presentation" onpointermove={(event) => (pointer = { x: event.clientX, y: event.clientY })}>
-		<div class="world" style:transform={drone(DEPTH)} in:fly out:fly={{ back: true }}>
-			<div class="sky" style:width="{SKY[0] * unit}px" style:height="{SKY[1] * unit}px" style:transform="rotateY({YAW}deg) translateZ({-SKY[2] * unit}px) translate(-50%, -100%)">
-				{#each TOWERS as [x, height], i}
-					<img class="tower" src={image(BUILDINGS[i % BUILDINGS.length])} alt="" style:left="{(SKY[0] / 2 + x) * unit}px" style:height="{height * unit}px" />
+	<div class="stage" style:perspective="{perspective}px" role="presentation" onpointermove={hover}>
+		{#if gpu}
+			<canvas
+				bind:this={canvas}
+				style:cursor={hovered === null ? null : 'pointer'}
+				in:lift|global
+				out:lift|global={{ back: true }}
+				onclick={(event) => {
+					const ring = pick(event.clientX, event.clientY);
+					if (ring !== null) choose(ring);
+				}}
+				onpointerleave={() => (hovered = null)}
+			></canvas>
+		{:else}
+			<div class="world" style:transform={drone(DEPTH)} in:fly|global out:fly|global={{ back: true }}>
+				<div class="sky" style:width="{SKY[0] * unit}px" style:height="{SKY[1] * unit}px" style:transform="rotateY({YAW}deg) translateZ({-SKY[2] * unit}px) translate(-50%, -100%)">
+					{#each TOWERS as [x, height], i}
+						<img class="tower" src={image(BUILDINGS[i % BUILDINGS.length])} alt="" style:left="{(SKY[0] / 2 + x) * unit}px" style:height="{height * unit}px" />
+					{/each}
+				</div>
+				<div class="ledge" style:--ledge={tint(1)} style:width={rim.width} style:height={rim.height} style:clip-path={rim.clip} style:transform={rim.transform}></div>
+				{#each terraces as terrace, i (terrace.ring)}
+					{@const { ring, angles, outer, inner, top, bottom } = terrace}
+					{@const last = i === RING_COUNT - 1}
+					<div
+						class="terrace"
+						class:lit={hovered === ring}
+						style:--ledge={terrace.ledge}
+						style:--lit={terrace.lit}
+						style:--dark={terrace.dark}
+						style:--light={terrace.light}
+						style:--band="{(WALL * unit) / BANDS}px"
+						class:shown={phase(ring) < 2}
+						style:--glyphs={textures[ring]?.[0]}
+						style:--overlay={overlay(ring)}
+						role="button"
+						tabindex="0"
+						aria-label="Ring {ring}"
+						onclick={() => choose(ring)}
+						onkeydown={(event) => onkeydown(event, ring)}
+						onpointerenter={() => (hovered = ring)}
+						onpointerleave={() => hovered === ring && (hovered = null)}
+						onfocus={(event) => {
+							hovered = ring;
+							if (event.currentTarget.matches(':focus-visible')) pointer = { x: innerWidth / 2, y: innerHeight / 2 };
+						}}
+						onblur={() => hovered === ring && (hovered = null)}
+					>
+						{#each angles as angle}
+							<div
+								class="wall"
+								style:width="{outer * SLICE + 3}px"
+								style:background-position-x="{((angle * SIDES) / 360) * outer * SLICE}px"
+								style:height="{bottom - top + 1}px"
+								style:transform="translateY({top}px) rotateY({angle}deg) translateZ({-outer}px) translate(-50%, 0)"
+							></div>
+						{/each}
+						{#if last}
+							<div class="floor" style:width="{outer * CORNER * 2 + 4}px" style:height="{outer * CORNER * 2 + 4}px" style:transform="translateY({bottom}px) rotateX(90deg) translate(-50%, -50%)"></div>
+						{:else}
+							{@const ledge = annulus(outer * CORNER + 1, inner)}
+							<div class="ledge" style:width={ledge.width} style:height={ledge.height} style:clip-path={ledge.clip} style:transform="translateY({bottom}px) {ledge.transform}"></div>
+						{/if}
+					</div>
 				{/each}
 			</div>
-			<div class="ledge" style:--ledge={tint(1)} style:width={rim.width} style:height={rim.height} style:clip-path={rim.clip} style:transform={rim.transform}></div>
-			{#each terraces as terrace, i (terrace.ring)}
-				{@const { ring, angles, outer, inner, top, bottom } = terrace}
-				{@const last = i === RING_COUNT - 1}
-				<div
-					class="terrace"
-					class:lit={hovered === ring}
-					style:--ledge={terrace.ledge}
-					style:--lit={terrace.lit}
-					style:--dark={terrace.dark}
-					style:--light={terrace.light}
-					style:--band="{(WALL * unit) / BANDS}px"
-					class:shown={phase(ring) < 2}
-					style:--glyphs={textures[ring]?.[0]}
-					style:--overlay={overlay(ring)}
-					role="button"
-					tabindex="0"
+		{/if}
+	</div>
+
+	{#if gpu}
+		<div class="rings">
+			{#each terraces as { ring } (ring)}
+				<button
 					aria-label="Ring {ring}"
 					onclick={() => choose(ring)}
-					onkeydown={(event) => onkeydown(event, ring)}
-					onpointerenter={() => (hovered = ring)}
-					onpointerleave={() => hovered === ring && (hovered = null)}
 					onfocus={(event) => {
 						hovered = ring;
 						if (event.currentTarget.matches(':focus-visible')) pointer = { x: innerWidth / 2, y: innerHeight / 2 };
 					}}
 					onblur={() => hovered === ring && (hovered = null)}
-				>
-					{#each angles as angle}
-						<div
-							class="wall"
-							style:width="{outer * SLICE + 3}px"
-							style:background-position-x="{((angle * SIDES) / 360) * outer * SLICE}px"
-							style:height="{bottom - top + 1}px"
-							style:transform="translateY({top}px) rotateY({angle}deg) translateZ({-outer}px) translate(-50%, 0)"
-						></div>
-					{/each}
-					{#if last}
-						<div class="floor" style:width="{outer * CORNER * 2 + 4}px" style:height="{outer * CORNER * 2 + 4}px" style:transform="translateY({bottom}px) rotateX(90deg) translate(-50%, -50%)"></div>
-					{:else}
-						{@const ledge = annulus(outer * CORNER + 1, inner)}
-						<div class="ledge" style:width={ledge.width} style:height={ledge.height} style:clip-path={ledge.clip} style:transform="translateY({bottom}px) {ledge.transform}"></div>
-					{/if}
-				</div>
+				></button>
 			{/each}
 		</div>
-	</div>
+	{/if}
 
 	{#if hovered !== null}
 		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:translate="{pointer.x}px {pointer.y}px" bind:clientHeight={cardHeight}>
@@ -418,6 +647,21 @@
 		position: absolute;
 		inset: 0;
 		perspective-origin: calc(200% / 3) 62%;
+	}
+
+	canvas {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+	}
+
+	.rings {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
 	}
 
 	.world {
