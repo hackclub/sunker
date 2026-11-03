@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { allowedTabs } from '#lib/admin/access.js';
+	import Konami from '#lib/Konami.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
 
 	const tabs = $derived(allowedTabs(data.admin));
 </script>
+
+<Konami enabled={data.admin.superadmin} />
 
 <div class="admin">
 	<nav>

@@ -1,9 +1,9 @@
 use sqlx::{PgPool, Postgres, migrate::MigrateDatabase, postgres::PgPoolOptions};
 
 const GUILDS: [(&str, &str); 3] = [
-    ("guild-a", "Guild A"),
-    ("guild-b", "Guild B"),
-    ("guild-c", "Guild C"),
+    ("toslow", "Toslow"),
+    ("sambro", "Sambro"),
+    ("malpeque", "Malpeque"),
 ];
 
 const ENEMIES: [&str; 3] = ["chunker", "crawler", "hopper"];

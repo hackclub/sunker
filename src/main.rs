@@ -8,7 +8,9 @@ mod database;
 mod joel;
 mod mines;
 mod moderation;
+mod onboarding;
 mod operations;
+mod orders;
 mod projects;
 mod propaganda;
 mod styling;
@@ -159,6 +161,8 @@ async fn main() -> std::io::Result<()> {
                 operations::launch,
             ))
             .service((auth::start, auth::callback, auth::session, auth::logout))
+            .service((onboarding::me, onboarding::save_character, onboarding::advance, onboarding::reset))
+            .service((orders::list, orders::overview, orders::update))
             .service((propaganda::overview, propaganda::submit))
             .service((propaganda::queue, propaganda::repoll, propaganda::verify))
             .service((styling::manifest, styling::image, styling::events))

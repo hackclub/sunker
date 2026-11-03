@@ -2,6 +2,7 @@
 	import Dialog from '#lib/admin/Dialog.svelte';
 	import type { Permissions } from '#lib/admin/access.js';
 	import Table from './Table.svelte';
+	import { ORDER_STATUSES } from '#lib/orders.js';
 	import {
 		PRIVATE_FIELDS,
 		RESOURCES,
@@ -17,8 +18,9 @@
 	type Field = {
 		key: string;
 		label: string;
-		type: 'text' | 'number' | 'textarea';
+		type: 'text' | 'number' | 'textarea' | 'select';
 		value: string;
+		options?: readonly string[];
 	};
 
 	type Values = Record<string, string | number | null>;
@@ -384,17 +386,17 @@
 							<button
 								onclick={() =>
 									ask({
-										title: `Mark order #${row.id} fulfilled`,
-										kind: 'order_fulfill',
+										title: `Set order #${row.id} status`,
+										kind: 'order_status',
 										extra: { order_id: row.id },
-										fields: [{ key: 'tracking_number', label: 'Tracking number', type: 'text', value: String(row.tracking_number ?? '') }]
+										fields: [
+											{ key: 'status', label: 'Status', type: 'select', value: String(row.status), options: ORDER_STATUSES },
+											{ key: 'tracking_number', label: 'Tracking number', type: 'text', value: String(row.tracking_number ?? '') }
+										]
 									})}
 							>
-								{row.fulfilled_at ? 'Edit tracking' : 'Fulfil'}
+								Status
 							</button>
-							{#if row.fulfilled_at}
-								<button class="danger" onclick={() => ask({ title: `Mark order #${row.id} unfulfilled`, kind: 'order_unfulfill', extra: { order_id: row.id } })}>Unfulfil</button>
-							{/if}
 						{/if}
 					{/snippet}
 				</Table>
@@ -495,6 +497,10 @@
 						<span>{field.label}</span>
 						{#if field.type === 'textarea'}
 							<textarea bind:value={values[field.key]} rows="3"></textarea>
+						{:else if field.type === 'select'}
+							<select bind:value={values[field.key]}>
+								{#each field.options ?? [] as option (option)}<option value={option}>{option}</option>{/each}
+							</select>
 						{:else}
 							<input type={field.type} bind:value={values[field.key]} />
 						{/if}

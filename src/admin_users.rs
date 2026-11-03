@@ -442,31 +442,31 @@ async fn apply(
             let verb = if kind == "ship_delete" { "Soft deleted" } else { "Restored" };
             format!("{verb} ship #{ship}")
         }
-        "order_fulfill" | "order_unfulfill" => {
+        "order_status" => {
             let order = number(body, "order_id")?;
-            let fulfil = kind == "order_fulfill";
+            let status = body["status"].as_str().unwrap_or_default();
+            if !crate::orders::STATUSES.contains(&status) {
+                return Err(bad("status must be pending, rejected, ordered or fulfilled"));
+            }
             let tracking = body["tracking_number"]
                 .as_str()
                 .map(str::trim)
                 .filter(|number| !number.is_empty());
             let result = sqlx::query(
                 "UPDATE \"order\" SET
-                     fulfilled_at = CASE WHEN $3 THEN coalesce(fulfilled_at, now()) END,
-                     tracking_number = CASE WHEN $3 THEN coalesce($4, tracking_number) END
+                     status = $3,
+                     fulfilled_at = CASE WHEN $3 = 'fulfilled' THEN coalesce(fulfilled_at, now()) END,
+                     tracking_number = coalesce($4, tracking_number)
                  WHERE id = $2 AND user_id = $1",
             )
             .bind(user)
             .bind(order)
-            .bind(fulfil)
+            .bind(status)
             .bind(tracking)
             .execute(&mut **tx)
             .await?;
             affected(result, "Order")?;
-            if fulfil {
-                format!("Marked order #{order} fulfilled")
-            } else {
-                format!("Marked order #{order} unfulfilled")
-            }
+            format!("Set order #{order} to {status}")
         }
         "message_delete" | "message_restore" => {
             let message = body["message_id"].as_i64().ok_or_else(|| bad("missing message_id"))?;
@@ -521,7 +521,7 @@ pub async fn action(
     };
     let needed = match body["kind"].as_str().unwrap_or_default() {
         "ban" | "unban" | "delete" | "restore" => Some(admin::Permission::Ban),
-        "resources" | "order_fulfill" | "order_unfulfill" => Some(admin::Permission::Resources),
+        "resources" | "order_status" => Some(admin::Permission::Resources),
         "guild" | "chats" | "slack_preference" => Some(admin::Permission::Chats),
         "handle" | "project_delete" | "project_restore" | "ship_decide" | "ship_delete" | "ship_restore"
         | "message_delete" | "message_restore" => Some(admin::Permission::Moderation),
@@ -530,20 +530,23 @@ pub async fn action(
     if needed.is_some_and(|permission| !admin.can(permission)) {
         return HttpResponse::Forbidden().body("You don't have permission for that action");
     }
-    let admin = admin.id;
+    run(&pool, *id, admin.id, &body).await
+}
+
+pub async fn run(pool: &PgPool, user: i32, admin: i32, body: &Value) -> HttpResponse {
     let reason = body["reason"]
         .as_str()
         .map(str::trim)
         .filter(|reason| !reason.is_empty());
     let outcome = async {
         let mut tx = pool.begin().await?;
-        let (kind, summary) = apply(&mut tx, *id, admin, &body).await?;
+        let (kind, summary) = apply(&mut tx, user, admin, body).await?;
         sqlx::query(
             "INSERT INTO admin_action (admin_id, action, user_id, summary, reason) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(admin)
         .bind(&kind)
-        .bind(*id)
+        .bind(user)
         .bind(&summary)
         .bind(reason)
         .execute(&mut *tx)

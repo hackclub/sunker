@@ -33,4 +33,10 @@ export const ACTIONS = [
 	{ slug: 'chats', name: 'Chats / guild' }
 ] as const;
 
-export const allowedTabs = (access: Access) => TABS.filter((tab) => access.permissions[tab.slug]);
+export const NAV: { slug: string; name: string; permission: keyof Permissions }[] = [
+	...TABS.slice(0, 2).map((tab) => ({ ...tab, permission: tab.slug })),
+	{ slug: 'orders', name: 'Orders', permission: 'resources' },
+	...TABS.slice(2).map((tab) => ({ ...tab, permission: tab.slug }))
+];
+
+export const allowedTabs = (access: Access) => NAV.filter((tab) => access.permissions[tab.permission]);

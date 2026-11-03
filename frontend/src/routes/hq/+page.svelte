@@ -10,12 +10,20 @@
 	import { FLIGHT, crest, footprint, halo, inside, island, reveal, table as tabled } from '#lib/view.js';
 	import Projects from '#lib/hq/Projects.svelte';
 	import Propaganda from '#lib/hq/Propaganda.svelte';
-	import Help from '#lib/hq/Help.svelte';
+	import Orders from '#lib/hq/Orders.svelte';
 	import Chat from '#lib/hq/Chat.svelte';
 	import Operations from '#lib/hq/Operations.svelte';
 	import { planner } from '#lib/hq/planner.svelte.js';
 	import Profile from '#lib/hq/Profile.svelte';
+	import Konami from '#lib/Konami.svelte';
+	import Robosquirrel from '#lib/onboarding/Robosquirrel.svelte';
+	import Speech from '#lib/onboarding/Speech.svelte';
+	import Passport, { FOLD } from '#lib/onboarding/Passport.svelte';
+	import { advance, draft, me } from '#lib/me.svelte.js';
+	import { FAREWELL, GUILDS, QUIPS, TOUR, tilt as turn } from '#lib/robosquirrel.js';
+	import { goto } from '$app/navigation';
 	import type { Component } from 'svelte';
+	import { fade } from 'svelte/transition';
 
 	let { data } = $props();
 
@@ -26,7 +34,7 @@
 		left: [
 			{ label: 'Projects', icon: 'projects-icon', component: Projects, disabled: false, dot: false },
 			{ label: 'Propaganda', icon: 'propaganda-icon', component: Propaganda, disabled: false, dot: false },
-			{ label: 'Help', icon: 'help-icon', component: Help, disabled: false, dot: false }
+			{ label: 'Orders', icon: 'orders-icon', component: Orders, disabled: false, dot: false }
 		],
 		right: [
 			{ label: 'Chat', icon: 'chat-icon', component: Chat, disabled: false, dot: false },
@@ -47,7 +55,81 @@
 		update({ [side]: open[side] && active[side] === index ? null : slug(panels[side][index]) });
 	}
 
+	type Stop = { text?: string; area?: 'map' | 'mines'; spots: string[] };
+
+	const STOPS: Stop[] = [
+		{ text: TOUR[0], spots: ['Help'] },
+		{ text: TOUR[1], area: 'mines', spots: ['Orders'] },
+		{ text: TOUR[2], area: 'map', spots: ['Operations'] },
+		{ text: TOUR[3], spots: ['Chat'] },
+		{ text: GUILDS, spots: [] },
+		{ spots: [] },
+		{ text: FAREWELL, spots: [] }
+	];
+	const FINALE = STOPS.length - 1;
+	const STAMP = FINALE - 1;
+
+	const arriving = me.current?.stage === 'guild' || me.current?.stage === 'hq';
+	let stop = $state<number | null>(me.current?.stage === 'guild' ? 0 : me.current?.stage === 'hq' ? STAMP : null);
+	const current = $derived(stop === null ? null : STOPS[stop]);
+	const chatting = $derived(current?.spots.includes('Chat') ?? false);
+	let spoken = $state(false);
+	let tilt = $state(0);
+	const passport = draft(me.current?.character ?? null);
+	let quip = $state<string | null>(null);
+	let quipping: ReturnType<typeof setTimeout> | undefined;
+
+	function chatter() {
+		quip = QUIPS.filter((line) => line !== quip)[Math.floor(Math.random() * (QUIPS.length - 1))];
+		clearTimeout(quipping);
+		quipping = setTimeout(() => (quip = null), 10000);
+	}
+
+	let closing = $state(false);
+	let assigned = $state(0);
+	let booklet = $state(0);
+
+	async function shut() {
+		closing = true;
+		await new Promise((resolve) => setTimeout(resolve, FOLD));
+		closing = false;
+	}
+
+	async function onward() {
+		if (stop === null || closing) return;
+		if (current?.text && !spoken) return speech?.finish();
+		if (stop === STAMP) await shut();
+		tilt = turn(tilt);
+		if (stop === FINALE) {
+			stop = null;
+			advance('hq')
+				.then(() => advance('done'))
+				.catch(console.error);
+		} else stop++;
+		chat();
+	}
+
+	async function backward() {
+		if (stop === null || closing) return;
+		if (stop === STAMP) await shut();
+		tilt = turn(tilt);
+		if (stop === 0) goto('/onboarding?passport');
+		else stop--;
+		chat();
+	}
+
+	function chat() {
+		if (chatting || params().get('right') === 'chat') update({ right: chatting ? 'chat' : null }, { replace: true });
+	}
+
+	let speech = $state<Speech>();
+
 	function onkeydown(event: KeyboardEvent) {
+		if (current) {
+			if (event.key !== ' ' || (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable]'))) return;
+			event.preventDefault();
+			return onward();
+		}
 		if (event.key !== 'Escape' || mining) return;
 		if (wanted) close();
 		else if (open.left || open.right) update({ left: null, right: null });
@@ -79,6 +161,7 @@
 
 	let innerWidth = $state(0);
 	let innerHeight = $state(0);
+	const shrink = $derived(booklet ? Math.min(1, (innerHeight - 72 - assigned) / booklet) : 1);
 	let ratio = $state(1);
 	let natural = $state(0);
 	const wall = $derived(Math.round((innerHeight * ratio) / 3));
@@ -112,6 +195,7 @@
 	const seam = $derived(halo(outline, tiles, innerWidth, innerHeight, mine));
 	const top = $derived(crest(outline, tiles, innerWidth, innerHeight));
 	let hovering = $state<'map' | 'mines' | null>(null);
+	const shown = $derived(current ? (current.area ?? null) : hovering);
 
 	function over(event: PointerEvent | MouseEvent) {
 		const box = flight.getBoundingClientRect();
@@ -143,7 +227,7 @@
 
 	function onclick(event: MouseEvent) {
 		event.preventDefault();
-		if (wanted || mining) return;
+		if (wanted || mining || current) return;
 		const target = event.detail === 0 ? 'map' : over(event);
 		if (target === 'map') update({ map: true }, { state: { map: true } });
 		if (target === 'mines') dig();
@@ -166,6 +250,10 @@
 		if (page.state.map) history.back();
 		else update({ map: null, operation: null }, { replace: true, state: {} });
 	}
+
+	$effect(() => {
+		if (current && (wanted || mining)) update({ map: null, operation: null, mines: null, ring: null }, { replace: true, state: {} });
+	});
 
 	$effect(() => {
 		if (params().has('operation') && !wanted) update({ map: true }, { replace: true, state: {} });
@@ -331,20 +419,41 @@
 	});
 </script>
 
-<svelte:window bind:innerWidth bind:innerHeight {onkeydown} {onpointermove} />
+<svelte:window
+	bind:innerWidth
+	bind:innerHeight
+	{onkeydown}
+	{onpointermove}
+	onpointerdown={(event) => {
+		if (!(event.target instanceof Element && event.target.closest('.corner'))) quip = null;
+	}}
+/>
+
+<Konami enabled={me.current?.superadmin ?? false} />
 
 <svelte:head>
 	<title>{mining ? 'Mines' : wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
 </svelte:head>
 
-<div class="hq">
+<div class="hq" class:chatting>
 	<canvas class="floor" class:smooth={SMOOTH} bind:this={floor}></canvas>
 	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
+	<div class="corner" class:touring={!!current} class:away={!docked} style:top="{wall / ratio}px">
+		<Robosquirrel mode="bob" {tilt} size="clamp(96px, 11vw, 180px)" onclick={current ? undefined : chatter} />
+		{#if current?.text}
+			<div class="bubble">{#key stop}<Speech bind:this={speech} bind:done={spoken} text={current.text} />{/key}</div>
+		{:else if !current && quip}
+			<div class="bubble" out:fade={{ duration: 250 }}>{#key quip}<Speech text={quip} />{/key}</div>
+		{/if}
+	</div>
+
+	<button class="help" class:spotlit={current?.spots.includes('Help')} aria-label="Help"><img src={image('help-icon')} alt="" /><span class="tip left">Help</span></button>
+
 	<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
-	{#if hovering && docked}
-		{#if hovering === 'mines'}
-			<svg class="outline seam" viewBox="0 0 {innerWidth} {innerHeight}">
+	{#if shown && docked}
+		{#if shown === 'mines'}
+			<svg class="outline seam" class:spotlit={!!current} viewBox="0 0 {innerWidth} {innerHeight}">
 				<mask id="seam">
 					<rect width={innerWidth} height={innerHeight} fill="white" />
 					<path d={seam} fill="black" stroke="none" />
@@ -354,16 +463,17 @@
 		{:else}
 			<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
 		{/if}
-		<span class="label" style:top="{top}px">{hovering === 'mines' ? 'Mines' : 'Map'}</span>
+		<span class="label" class:spotlit={!!current} style:top="{top}px">{shown === 'mines' ? 'Mines' : 'Map'}</span>
 	{/if}
-	<a class="enter" href="?map" aria-label="Open map" class:hovering {onclick} onfocus={() => (hovering = !docked || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
+	<a class="enter" href="?map" aria-label="Open map" inert={!!current} class:hovering {onclick} onfocus={() => (hovering = !docked || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
 	<a
 		class="dig"
 		href="?mines"
 		aria-label="Open mines"
+		inert={!!current}
 		onclick={(event) => {
 			event.preventDefault();
-			if (!wanted && !mining) dig();
+			if (!wanted && !mining && !current) dig();
 		}}
 		onfocus={() => (hovering = !docked || mining ? null : 'mines')}
 		onblur={() => (hovering = null)}
@@ -392,6 +502,7 @@
 				{@const { label, icon, disabled, dot } = panels[side][i]}
 				<button
 					class="tab {side}"
+					class:spotlit={current?.spots.includes(label)}
 					aria-label={label}
 					aria-expanded={open[side] && active[side] === i}
 					style:top="calc(50% + {offset(panels[side].length, i)}px)"
@@ -428,6 +539,31 @@
 
 	{#if mining}
 		<Mines onback={leave} onproject={visit} />
+	{/if}
+
+	{#if current}
+		<button class="dim" aria-label="Continue" onclick={onward}>
+			<svg viewBox="0 0 {innerWidth} {innerHeight}" aria-hidden="true">
+				<mask id="spotlight">
+					<rect width={innerWidth} height={innerHeight} fill="white" />
+					{#if current.area}<path d={current.area === 'mines' ? seam : border} fill="black" />{/if}
+				</mask>
+				<rect class="shade" width={innerWidth} height={innerHeight} mask="url(#spotlight)" />
+			</svg>
+		</button>
+		{#if stop === STAMP}
+			<div class="stamp" in:fade={{ duration: 250 }}>
+				<p class="assigned" role="status" bind:offsetHeight={assigned}>You have been assigned to the Guild of <strong>{me.current?.guild?.name}</strong></p>
+				<div class="booklet" inert bind:offsetHeight={booklet} style:transform="scale({shrink})" style:margin-bottom="{(shrink - 1) * booklet}px"><Passport draft={passport} guild={me.current?.guild} stamping fold closed={closing} /></div>
+			</div>
+		{/if}
+		<button class="rewind" onclick={backward}>
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+			Back
+		</button>
+	{/if}
+	{#if arriving}
+		<div class="arrive"></div>
 	{/if}
 </div>
 
@@ -717,6 +853,203 @@
 		height: 1px;
 		overflow: hidden;
 		clip-path: inset(50%);
+	}
+
+	.corner {
+		position: fixed;
+		left: 96px;
+		z-index: 19;
+		transform: translateY(-62%);
+		pointer-events: none;
+	}
+
+	.corner.touring {
+		z-index: 31;
+	}
+
+	.corner.away {
+		z-index: 9;
+	}
+
+	.corner:not(.touring) :global(.robosquirrel),
+	.corner:not(.touring) .bubble {
+		pointer-events: auto;
+	}
+
+	.corner :global(button.robosquirrel:hover) {
+		background: none;
+	}
+
+	.corner .bubble {
+		position: absolute;
+		top: 10%;
+		left: calc(100% + 12px);
+		width: min(420px, calc(100vw - 100% - 140px));
+		padding: 14px 18px;
+		border: 1px solid var(--island-border);
+		border-radius: 12px;
+		background: var(--island);
+		box-shadow: 0 16px 48px var(--shadow);
+	}
+
+	.corner .bubble::before {
+		content: '';
+		position: absolute;
+		top: 22px;
+		left: -9px;
+		width: 16px;
+		height: 16px;
+		border-bottom: 1px solid var(--island-border);
+		border-left: 1px solid var(--island-border);
+		background: var(--island);
+		transform: rotate(45deg);
+	}
+
+	.corner .bubble :global(.speech) {
+		font-size: 15px;
+	}
+
+	.dim {
+		position: fixed;
+		inset: 0;
+		z-index: 30;
+		width: auto;
+		height: auto;
+		padding: 0;
+		border-radius: 0;
+		background: none;
+	}
+
+	.dim:hover:enabled {
+		background: none;
+	}
+
+	.dim svg {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+	}
+
+	.shade {
+		fill: color-mix(in srgb, var(--background) 60%, transparent);
+	}
+
+	.spotlit {
+		z-index: 31;
+		pointer-events: none;
+	}
+
+	.chatting :global(:is(.dialog, .panel).right) {
+		z-index: 31;
+	}
+
+	.tab.spotlit,
+	.help.spotlit {
+		z-index: 31;
+		background: var(--hover);
+	}
+
+	.spotlit .tip {
+		visibility: visible;
+	}
+
+	.stamp {
+		position: fixed;
+		inset: 0;
+		z-index: 31;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		padding: 16px;
+		pointer-events: none;
+	}
+
+	.booklet {
+		width: min(560px, 100%);
+		transform-origin: top;
+	}
+
+	.assigned {
+		margin: 0;
+		padding: 16px 24px;
+		border: 1px solid var(--island-border);
+		border-radius: 12px;
+		background: var(--island);
+		font-size: 18px;
+		text-align: center;
+	}
+
+	.assigned strong {
+		color: var(--accent);
+	}
+
+	.rewind {
+		position: fixed;
+		bottom: 96px;
+		left: 16px;
+		z-index: 32;
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		width: auto;
+		height: auto;
+		padding: 8px 14px 8px 8px;
+		border: 1px solid var(--island-border);
+		border-radius: 6px;
+		background: var(--island);
+		color: var(--text);
+		font: 500 13px 'Inter', sans-serif;
+		cursor: pointer;
+	}
+
+	.rewind:hover:enabled {
+		background: var(--hover);
+	}
+
+	.rewind svg {
+		width: 18px;
+		height: 18px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.help {
+		position: fixed;
+		bottom: 16px;
+		left: 16px;
+		z-index: 19;
+		border: 1px solid var(--island-border);
+		background: var(--island);
+	}
+
+	.help img {
+		width: 44px;
+		height: 44px;
+	}
+
+	.help .tip {
+		top: 50%;
+	}
+
+	.arrive {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		background: var(--background);
+		pointer-events: none;
+		animation: arrive 0.7s ease-out forwards;
+	}
+
+	@keyframes arrive {
+		to {
+			opacity: 0;
+		}
 	}
 
 	.table {

@@ -92,6 +92,30 @@ export const COLOURS: Record<string, Record<string, string>> = {
 	},
 	Mines: {
 		'mines-depth': '#2a2b2d'
+	},
+	Passport: {
+		'passport-cover': '#24344f',
+		'passport-paper': '#e9ebee',
+		'passport-paper-shade': '#dadde2',
+		'passport-guilloche': '#b4b7b9',
+		'passport-ink': '#1e1f22',
+		'passport-label': '#5c6066',
+		'passport-red': '#3574f0',
+		'passport-photo': '#c8cbd0',
+		'passport-silhouette': '#9da1a8',
+		'passport-missing': '#548cde'
+	},
+	Features: {
+		'feature-1': '#2b2b2b',
+		'feature-2': '#ffffff',
+		'feature-3': '#6b4226',
+		'feature-4': '#d9a066',
+		'feature-5': '#d94a4a',
+		'feature-6': '#f08a3c',
+		'feature-7': '#f5d547',
+		'feature-8': '#5cb85c',
+		'feature-9': '#548cde',
+		'feature-10': '#9b59b6'
 	}
 };
 
