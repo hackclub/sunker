@@ -1,4 +1,5 @@
 use crate::admin::{self, Permission};
+use crate::{economy, history, prize_images};
 use actix_web::{HttpRequest, HttpResponse, delete, get, post, put, web};
 use serde_json::{Map, Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
@@ -20,11 +21,22 @@ const CONTRACT: &str = "jsonb_build_object(
     'video_url', t.video_url, 'criteria', t.criteria, 'resources', t.resources
 )";
 
-const PRIZE: &str = "jsonb_build_object('id', z.id, 'ring', z.ring, 'name', z.name, 'tagline', z.tagline, 'description', z.description)";
+const ACTIVE: &str = "jsonb_build_object('active', (SELECT count(*) FROM project p WHERE p.contract_slug = t.slug AND p.deleted_at IS NULL))";
+
+const PRIZE: &str = "jsonb_build_object(
+    'id', z.id, 'ring', z.ring, 'name', z.name, 'tagline', z.tagline, 'description', z.description,
+    'image', '/api/prizes/' || z.id || '/image?v=' || left(md5(z.image_url), 8)
+)";
 
 const INTERNAL: &str = "jsonb_build_object(
-    'base_cost_cents', z.base_cost_cents, 'additional_cost_cents', z.additional_cost_cents, 'fulfillment_links', z.fulfillment_links
+    'base_cost_cents', z.base_cost_cents, 'additional_cost_cents', z.additional_cost_cents, 'fulfillment_links', z.fulfillment_links,
+    'image_url', z.image_url
 )";
+
+const GENERAL: &str = "general";
+const GENERAL_DESCRIPTION: &str = "Any project at all. +5 Chiprock per hour, on top of the ring prizes.";
+
+const THRESHOLDS: &str = "(SELECT coalesce(jsonb_agg(format('Ring %s if it exceeds %s hours', r.ring, (round((r.min_hours / 10)::numeric) * 10 + 5)::int) ORDER BY r.ring DESC), '[]') FROM ring r)";
 
 struct Contract {
     ring: i16,
@@ -41,6 +53,7 @@ struct Prize {
     name: String,
     tagline: String,
     description: String,
+    image_url: Option<String>,
     base_cost_cents: i32,
     additional_cost_cents: i32,
     fulfillment_links: Vec<String>,
@@ -131,6 +144,7 @@ fn prize(body: &Value) -> Result<Prize, String> {
         name: name(body)?,
         tagline: text(body, "tagline"),
         description: text(body, "description"),
+        image_url: link(body, "image_url")?,
         base_cost_cents: cents(body, "base_cost_cents")?,
         additional_cost_cents: cents(body, "additional_cost_cents")?,
         fulfillment_links: lines(body, "fulfillment_links").iter().map(|line| url(line)).collect::<Result<_, _>>()?,
@@ -147,7 +161,30 @@ pub fn slug(name: &str) -> String {
     if slug.is_empty() { "contract".into() } else { slug.chars().take(60).collect() }
 }
 
-async fn log(tx: &mut Transaction<'_, Postgres>, admin: i32, action: &str, summary: String) -> sqlx::Result<()> {
+pub async fn fresh_slug(tx: &mut Transaction<'_, Postgres>, name: &str) -> sqlx::Result<String> {
+    let base = slug(name);
+    let mut slug = base.clone();
+    let mut n = 2;
+    while sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM contract WHERE slug = $1)")
+        .bind(&slug)
+        .fetch_one(&mut **tx)
+        .await?
+    {
+        slug = format!("{base}-{n}");
+        n += 1;
+    }
+    Ok(slug)
+}
+
+async fn locked(pool: &PgPool, what: &str) -> Option<HttpResponse> {
+    match economy::synced(pool).await {
+        Ok(false) => None,
+        Ok(true) => Some(HttpResponse::Conflict().body(format!("{what} come from the economy sheet, turn off sheet sync to add or remove them"))),
+        Err(e) => Some(failed("checking sheet sync", e)),
+    }
+}
+
+pub async fn log(tx: &mut Transaction<'_, Postgres>, admin: i32, action: &str, summary: String) -> sqlx::Result<()> {
     sqlx::query("INSERT INTO admin_action (admin_id, action, summary) VALUES ($1, $2, $3)")
         .bind(admin)
         .bind(action)
@@ -157,11 +194,24 @@ async fn log(tx: &mut Transaction<'_, Postgres>, admin: i32, action: &str, summa
     Ok(())
 }
 
+pub async fn seed(pool: &PgPool) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO contract (slug, ring, name, description) VALUES ($1, 5, 'General', $2)
+         ON CONFLICT (slug) DO UPDATE SET ring = 5, name = 'General', description = $2, criteria = '{}', deleted_at = NULL",
+    )
+    .bind(GENERAL)
+    .bind(GENERAL_DESCRIPTION)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[get("/api/mines")]
 pub async fn list(pool: web::Data<PgPool>) -> HttpResponse {
     let mines: sqlx::Result<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT jsonb_build_object(
-             'contracts', (SELECT coalesce(jsonb_agg({CONTRACT} || jsonb_build_object('active', (SELECT count(*) FROM project p WHERE p.contract_slug = t.slug AND p.deleted_at IS NULL)) ORDER BY t.ring DESC, t.name), '[]') FROM contract t WHERE t.deleted_at IS NULL),
+             'contracts', (SELECT coalesce(jsonb_agg({CONTRACT} || {ACTIVE} ORDER BY t.ring DESC, t.name), '[]') FROM contract t WHERE t.deleted_at IS NULL AND t.slug <> '{GENERAL}'),
+             'quarry', (SELECT coalesce(jsonb_agg({CONTRACT} || {ACTIVE} || jsonb_build_object('criteria', {THRESHOLDS})), '[]') FROM contract t WHERE t.deleted_at IS NULL AND t.slug = '{GENERAL}'),
              'prizes', (SELECT coalesce(jsonb_agg({PRIZE} ORDER BY z.ring DESC, z.name), '[]') FROM prize z WHERE z.deleted_at IS NULL)
          )"
     )))
@@ -180,7 +230,7 @@ pub async fn overview(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse
     }
     let mines: sqlx::Result<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT jsonb_build_object(
-             'contracts', (SELECT coalesce(jsonb_agg({CONTRACT} ORDER BY t.ring DESC, t.name), '[]') FROM contract t WHERE t.deleted_at IS NULL),
+             'contracts', (SELECT coalesce(jsonb_agg({CONTRACT} ORDER BY t.ring DESC, t.name), '[]') FROM contract t WHERE t.deleted_at IS NULL AND t.slug <> '{GENERAL}'),
              'prizes', (SELECT coalesce(jsonb_agg({PRIZE} || {INTERNAL} ORDER BY z.ring DESC, z.name), '[]') FROM prize z WHERE z.deleted_at IS NULL)
          )"
     )))
@@ -198,23 +248,17 @@ pub async fn create_contract(req: HttpRequest, body: web::Json<Value>, pool: web
         Ok(admin) => admin,
         Err(response) => return response,
     };
+    if let Some(response) = locked(&pool, "Contracts").await {
+        return response;
+    }
     let contract = match contract(&body) {
         Ok(contract) => contract,
         Err(message) => return HttpResponse::BadRequest().body(message),
     };
     let result: sqlx::Result<String> = async {
         let mut tx = pool.begin().await?;
-        let base = slug(&contract.name);
-        let mut slug = base.clone();
-        let mut n = 2;
-        while sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM contract WHERE slug = $1)")
-            .bind(&slug)
-            .fetch_one(&mut *tx)
-            .await?
-        {
-            slug = format!("{base}-{n}");
-            n += 1;
-        }
+        history::snapshot(&mut tx, &format!("Before creating contract {}", contract.name), Some(admin.id)).await?;
+        let slug = fresh_slug(&mut tx, &contract.name).await?;
         sqlx::query(
             "INSERT INTO contract (slug, ring, name, description, image_url, video_url, criteria, resources)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
@@ -256,10 +300,14 @@ pub async fn save_contract(
         Err(message) => return HttpResponse::BadRequest().body(message),
     };
     let result: sqlx::Result<HttpResponse> = async {
+        let synced = economy::synced(&pool).await?;
         let mut tx = pool.begin().await?;
+        history::snapshot(&mut tx, &format!("Before saving contract {}", contract.name), Some(admin.id)).await?;
         let done = sqlx::query(
-            "UPDATE contract SET ring = $2, name = $3, description = $4, image_url = $5, video_url = $6, criteria = $7, resources = $8
-             WHERE slug = $1 AND deleted_at IS NULL",
+            "UPDATE contract SET ring = CASE WHEN $9 THEN ring ELSE $2 END, name = CASE WHEN $9 THEN name ELSE $3 END,
+                 description = CASE WHEN $9 THEN description ELSE $4 END, image_url = $5, video_url = $6,
+                 criteria = CASE WHEN $9 THEN criteria ELSE $7 END, resources = $8
+             WHERE slug = $1 AND slug <> $10 AND deleted_at IS NULL",
         )
         .bind(slug.as_str())
         .bind(contract.ring)
@@ -269,6 +317,8 @@ pub async fn save_contract(
         .bind(&contract.video_url)
         .bind(&contract.criteria)
         .bind(&contract.resources)
+        .bind(synced)
+        .bind(GENERAL)
         .execute(&mut *tx)
         .await?;
         if done.rows_affected() == 0 {
@@ -288,12 +338,17 @@ pub async fn remove_contract(req: HttpRequest, slug: web::Path<String>, pool: we
         Ok(admin) => admin,
         Err(response) => return response,
     };
+    if let Some(response) = locked(&pool, "Contracts").await {
+        return response;
+    }
     let result: sqlx::Result<HttpResponse> = async {
         let mut tx = pool.begin().await?;
+        history::snapshot(&mut tx, &format!("Before deleting contract {slug}"), Some(admin.id)).await?;
         let name: Option<String> = sqlx::query_scalar(
-            "UPDATE contract SET deleted_at = now() WHERE slug = $1 AND deleted_at IS NULL RETURNING name",
+            "UPDATE contract SET deleted_at = now() WHERE slug = $1 AND slug <> $2 AND deleted_at IS NULL RETURNING name",
         )
         .bind(slug.as_str())
+        .bind(GENERAL)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(name) = name else {
@@ -313,15 +368,19 @@ pub async fn create_prize(req: HttpRequest, body: web::Json<Value>, pool: web::D
         Ok(admin) => admin,
         Err(response) => return response,
     };
+    if let Some(response) = locked(&pool, "Prizes").await {
+        return response;
+    }
     let prize = match prize(&body) {
         Ok(prize) => prize,
         Err(message) => return HttpResponse::BadRequest().body(message),
     };
     let result: sqlx::Result<i32> = async {
         let mut tx = pool.begin().await?;
+        history::snapshot(&mut tx, &format!("Before creating prize {}", prize.name), Some(admin.id)).await?;
         let id = sqlx::query_scalar(
-            "INSERT INTO prize (ring, name, tagline, description, base_cost_cents, additional_cost_cents, fulfillment_links)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            "INSERT INTO prize (ring, name, tagline, description, base_cost_cents, additional_cost_cents, fulfillment_links, image_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
         )
         .bind(prize.ring)
         .bind(&prize.name)
@@ -330,10 +389,12 @@ pub async fn create_prize(req: HttpRequest, body: web::Json<Value>, pool: web::D
         .bind(prize.base_cost_cents)
         .bind(prize.additional_cost_cents)
         .bind(&prize.fulfillment_links)
+        .bind(&prize.image_url)
         .fetch_one(&mut *tx)
         .await?;
         log(&mut tx, admin.id, "prize_create", format!("Created prize {} (ring {})", prize.name, prize.ring)).await?;
         tx.commit().await?;
+        prize_images::refresh(&pool);
         Ok(id)
     }
     .await;
@@ -359,10 +420,13 @@ pub async fn save_prize(
         Err(message) => return HttpResponse::BadRequest().body(message),
     };
     let result: sqlx::Result<HttpResponse> = async {
+        let synced = economy::synced(&pool).await?;
         let mut tx = pool.begin().await?;
+        history::snapshot(&mut tx, &format!("Before saving prize {}", prize.name), Some(admin.id)).await?;
         let done = sqlx::query(
-            "UPDATE prize SET ring = $2, name = $3, tagline = $4, description = $5, base_cost_cents = $6,
-                 additional_cost_cents = $7, fulfillment_links = $8
+            "UPDATE prize SET ring = CASE WHEN $9 THEN ring ELSE $2 END, name = CASE WHEN $9 THEN name ELSE $3 END,
+                 tagline = $4, description = $5, base_cost_cents = CASE WHEN $9 THEN base_cost_cents ELSE $6 END,
+                 additional_cost_cents = $7, fulfillment_links = $8, image_url = $10
              WHERE id = $1 AND deleted_at IS NULL",
         )
         .bind(*id)
@@ -373,6 +437,8 @@ pub async fn save_prize(
         .bind(prize.base_cost_cents)
         .bind(prize.additional_cost_cents)
         .bind(&prize.fulfillment_links)
+        .bind(synced)
+        .bind(&prize.image_url)
         .execute(&mut *tx)
         .await?;
         if done.rows_affected() == 0 {
@@ -380,6 +446,7 @@ pub async fn save_prize(
         }
         log(&mut tx, admin.id, "prize_update", format!("Updated prize {}", prize.name)).await?;
         tx.commit().await?;
+        prize_images::refresh(&pool);
         Ok(HttpResponse::NoContent().finish())
     }
     .await;
@@ -392,8 +459,12 @@ pub async fn remove_prize(req: HttpRequest, id: web::Path<i32>, pool: web::Data<
         Ok(admin) => admin,
         Err(response) => return response,
     };
+    if let Some(response) = locked(&pool, "Prizes").await {
+        return response;
+    }
     let result: sqlx::Result<HttpResponse> = async {
         let mut tx = pool.begin().await?;
+        history::snapshot(&mut tx, &format!("Before deleting prize #{id}"), Some(admin.id)).await?;
         let name: Option<String> =
             sqlx::query_scalar("UPDATE prize SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING name")
                 .bind(*id)
@@ -404,6 +475,7 @@ pub async fn remove_prize(req: HttpRequest, id: web::Path<i32>, pool: web::Data<
         };
         log(&mut tx, admin.id, "prize_delete", format!("Deleted prize {name}")).await?;
         tx.commit().await?;
+        prize_images::refresh(&pool);
         Ok(HttpResponse::NoContent().finish())
     }
     .await;

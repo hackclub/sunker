@@ -1,4 +1,5 @@
 FROM rust:1-slim-bookworm AS backend
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release && rm -r src

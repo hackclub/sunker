@@ -5,6 +5,9 @@ mod analytics;
 mod auth;
 mod chats;
 mod database;
+mod economy;
+mod history;
+mod http;
 mod joel;
 mod mines;
 mod moderation;
@@ -12,6 +15,7 @@ mod onboarding;
 mod operations;
 mod orders;
 mod presence;
+mod prize_images;
 mod projects;
 mod propaganda;
 mod styling;
@@ -68,6 +72,11 @@ async fn main() -> std::io::Result<()> {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
     let pool = web::Data::new(database::init(&url).await.map_err(std::io::Error::other)?);
     styling::seed(&pool).await.map_err(std::io::Error::other)?;
+    mines::seed(&pool).await.map_err(std::io::Error::other)?;
+    prize_images::refresh(&pool);
+
+    let syncer = pool.clone();
+    actix_web::rt::spawn(async move { economy::startup(&syncer).await });
 
     let ticker = pool.clone();
     actix_web::rt::spawn(async move {
@@ -129,6 +138,8 @@ async fn main() -> std::io::Result<()> {
                 mines::save_prize,
                 mines::remove_prize,
             ))
+            .service((economy::overview, economy::toggle, economy::refresh))
+            .service((history::list, history::restore, prize_images::serve))
             .service(joel::announcements)
             .service((
                 joel::overview,

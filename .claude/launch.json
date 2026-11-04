@@ -10,7 +10,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cargo run"],
+      "runtimeArgs": ["-c", "env -u NIX_LDFLAGS -u NIX_CFLAGS_LINK -u NIX_CFLAGS_COMPILE cargo run"],
       "port": 4400
     },
     {

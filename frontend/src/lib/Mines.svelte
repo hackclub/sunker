@@ -374,7 +374,7 @@
 
 	const ring = $derived(terraces.find(({ ring }) => String(ring) === params().get('ring'))?.ring);
 
-	let mines = $state<{ contracts: Contract[]; prizes: Prize[] } | null>(null);
+	let mines = $state<{ contracts: Contract[]; quarry: Contract[]; prizes: Prize[] } | null>(null);
 	let broken = $state(false);
 	let claiming = $state<string | null>(null);
 	let claimed = $state(false);
@@ -449,6 +449,37 @@
 		if (gpu) hovered = pick(event.clientX, event.clientY);
 	}
 </script>
+
+{#snippet offer(contract: Contract)}
+	<article class="item">
+		{#if contract.image_url}
+			<img src={contract.image_url} alt="" />
+		{/if}
+		<h3>{contract.name}</h3>
+		<p class="count">{contract.active ?? 0} active</p>
+		{#if contract.description}
+			<p>{contract.description}</p>
+		{/if}
+		{#if contract.criteria.length}
+			<ul class="criteria">
+				{#each contract.criteria as criterion, i (i)}
+					<li>{criterion}</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if Object.keys(contract.resources).length}
+			<ul class="resources">
+				{#each Object.entries(contract.resources) as [name, amount] (name)}
+					<li>+{amount} {RESOURCE_NAMES[name] ?? name}</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if contract.video_url}
+			<a href={contract.video_url} target="_blank" rel="noreferrer">Watch the video</a>
+		{/if}
+		<button class="button primary embark" disabled={claiming !== null} onclick={() => embark(contract)}>{claiming === contract.slug ? 'Embarking...' : 'Embark'}</button>
+	</article>
+{/snippet}
 
 <svelte:window bind:innerWidth bind:innerHeight onkeydown={onescape} />
 
@@ -551,6 +582,15 @@
 			{/each}
 		</div>
 		<div class="list" bind:this={list}>
+			{#if tab === 'projects' && mines?.quarry.length}
+				<section>
+					<h2 class="heading">Quarry</h2>
+					<p class="empty">For general projects, rather than these specific projects that dive in to a particular category</p>
+					{#each mines.quarry as contract (contract.slug)}
+						{@render offer(contract)}
+					{/each}
+				</section>
+			{/if}
 			{#each RINGS as section (section)}
 				{@const contracts = mines?.contracts.filter((contract) => contract.ring === section) ?? []}
 				{@const prizes = mines?.prizes.filter((prize) => prize.ring === section) ?? []}
@@ -563,47 +603,27 @@
 					{/if}
 					{#if tab === 'projects'}
 						{#each contracts as contract (contract.slug)}
-							<article class="item">
-								{#if contract.image_url}
-									<img src={contract.image_url} alt="" />
-								{/if}
-								<h3>{contract.name}</h3>
-								<p class="count">{contract.active ?? 0} active</p>
-								{#if contract.description}
-									<p>{contract.description}</p>
-								{/if}
-								{#if contract.criteria.length}
-									<ul class="criteria">
-										{#each contract.criteria as criterion, i (i)}
-											<li>{criterion}</li>
-										{/each}
-									</ul>
-								{/if}
-								{#if Object.keys(contract.resources).length}
-									<ul class="resources">
-										{#each Object.entries(contract.resources) as [name, amount] (name)}
-											<li>+{amount} {RESOURCE_NAMES[name] ?? name}</li>
-										{/each}
-									</ul>
-								{/if}
-								{#if contract.video_url}
-									<a href={contract.video_url} target="_blank" rel="noreferrer">Watch the video</a>
-								{/if}
-								<button class="button primary embark" disabled={claiming !== null} onclick={() => embark(contract)}>{claiming === contract.slug ? 'Embarking...' : 'Embark'}</button>
-							</article>
+							{@render offer(contract)}
 						{/each}
 					{:else}
-						{#each prizes as prize (prize.id)}
-							<article class="item">
-								{#if prize.tagline}
-									<p class="tagline">{prize.tagline}</p>
-								{/if}
-								<h3>{prize.name}</h3>
-								{#if prize.description}
-									<p>{prize.description}</p>
-								{/if}
-							</article>
-						{/each}
+						<div class="prizes">
+							{#each prizes as prize (prize.id)}
+								<article class="item prize">
+									<div class="picture" class:blank={!prize.image}>
+										{#if prize.image}
+											<img src={prize.image} alt="" onerror={(event) => ((event.currentTarget as HTMLElement).hidden = true)} />
+										{/if}
+									</div>
+									{#if prize.tagline}
+										<p class="tagline">{prize.tagline}</p>
+									{/if}
+									<h3>{prize.name}</h3>
+									{#if prize.description}
+										<p>{prize.description}</p>
+									{/if}
+								</article>
+							{/each}
+						</div>
 					{/if}
 				</section>
 			{/each}
@@ -856,6 +876,35 @@
 		aspect-ratio: 16 / 9;
 		border-radius: 4px;
 		object-fit: cover;
+	}
+
+	.prizes {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(max(140px, calc(50% - 4px)), 1fr));
+		gap: 8px;
+	}
+
+	.prize {
+		aspect-ratio: 1;
+	}
+
+	.picture {
+		display: grid;
+		place-items: center;
+		aspect-ratio: 4 / 3;
+		border-radius: 4px;
+		overflow: hidden;
+	}
+
+	.blank {
+		background: var(--background);
+	}
+
+	.item .picture img {
+		width: 100%;
+		height: 100%;
+		aspect-ratio: auto;
+		object-fit: contain;
 	}
 
 	.item h3 {

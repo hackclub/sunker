@@ -80,9 +80,19 @@
 	const passport = draft(me.current?.character ?? null);
 	let quip = $state<string | null>(null);
 	let quipping: ReturnType<typeof setTimeout> | undefined;
+	let bag: string[] = [];
+	let said: string | null = null;
 
 	function chatter() {
-		quip = QUIPS.filter((line) => line !== quip)[Math.floor(Math.random() * (QUIPS.length - 1))];
+		if (!bag.length) {
+			bag = [...QUIPS];
+			for (let i = bag.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[bag[i], bag[j]] = [bag[j], bag[i]];
+			}
+			if (bag.length > 1 && bag[bag.length - 1] === said) [bag[0], bag[bag.length - 1]] = [bag[bag.length - 1], bag[0]];
+		}
+		quip = said = bag.pop()!;
 		clearTimeout(quipping);
 		quipping = setTimeout(() => (quip = null), 10000);
 	}
@@ -139,7 +149,7 @@
 
 	const PLANKS = ['plank', 'plank2', 'plank3'];
 	const BUILDINGS = ['building1', 'building2'];
-	const SCALE = 4;
+	const SCALE = 1 / 768;
 	const WIDTH = 128;
 	const HEIGHT = 16;
 	const SPACING = 96;
@@ -315,7 +325,7 @@
 		const height = Math.round(innerHeight * dpr);
 		const focal = height;
 		const pitch = (ANGLE * Math.PI) / 180;
-		const camera = (focal * Math.sin(pitch)) / (SCALE * dpr);
+		const camera = (focal * Math.sin(pitch)) / (innerWidth * SCALE * dpr);
 
 		const project = (y: number) => {
 			const tilt = Math.atan((y + 0.5 - height / 2) / focal);
