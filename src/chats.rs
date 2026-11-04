@@ -146,9 +146,24 @@ pub async fn create(
     body: web::Json<Value>,
     pool: web::Data<PgPool>,
 ) -> HttpResponse {
-    match member(&req, &pool, *id).await {
-        Ok(user) => send(&pool, user, *id, &body).await,
-        Err(response) => response,
+    let user = match member(&req, &pool, *id).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    let recent: Result<bool, _> = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM message WHERE author_id = $1 AND chat_id = $2 AND created_at > now() - interval '3 seconds')",
+    )
+    .bind(user)
+    .bind(*id)
+    .fetch_one(pool.get_ref())
+    .await;
+    match recent {
+        Ok(false) => send(&pool, user, *id, &body).await,
+        Ok(true) => HttpResponse::TooManyRequests().body("Slow down, wait 3 seconds between messages"),
+        Err(e) => {
+            eprintln!("checking slowmode failed: {e}");
+            HttpResponse::InternalServerError().finish()
+        }
     }
 }
 
@@ -176,7 +191,7 @@ pub async fn flag(
                  SELECT m.id FROM message m
                  JOIN chat ON chat.id = m.chat_id
                  JOIN \"user\" ON {ACCESS}
-                 WHERE m.id = $1 AND \"user\".id = $2 AND m.deleted_at IS NULL
+                 WHERE m.id = $1 AND \"user\".id = $2 AND NOT \"user\".is_banned AND m.deleted_at IS NULL
              ), applied AS ({applied})
              SELECT EXISTS (SELECT 1 FROM target)"
         )))

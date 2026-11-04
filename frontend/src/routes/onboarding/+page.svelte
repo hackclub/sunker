@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, preloadCode, preloadData } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import Konami from '#lib/Konami.svelte';
@@ -9,6 +9,7 @@
 	import Speech from '#lib/onboarding/Speech.svelte';
 	import { advance, complete, draft, load, me, save } from '#lib/me.svelte.js';
 	import { INTRO, tilt as turn } from '#lib/robosquirrel.js';
+	import { image, styles } from '#lib/styles.svelte.js';
 
 	let { data } = $props();
 
@@ -49,6 +50,20 @@
 		} catch {}
 	});
 
+	$effect(() => {
+		const warmed: HTMLImageElement[] = [];
+		const id = (window.requestIdleCallback ?? setTimeout)(() => {
+			preloadCode('/hq').catch(() => {});
+			for (const slug of Object.keys(styles.images)) {
+				const sprite = new Image();
+				sprite.fetchPriority = 'low';
+				sprite.src = image(slug);
+				warmed.push(sprite);
+			}
+		});
+		return () => (window.cancelIdleCallback ?? clearTimeout)(id);
+	});
+
 	const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 	const fold = () => {
 		closing = true;
@@ -76,6 +91,7 @@
 			await save(character);
 			if (me.current?.stage === 'passport') await advance('guild');
 			await load();
+			preloadData('/hq').catch(() => {});
 			await fold();
 			leaving = true;
 			try {

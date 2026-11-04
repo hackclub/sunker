@@ -21,6 +21,7 @@
 
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { me } from '#lib/me.svelte.js';
 	import { params, update } from '#lib/url.svelte.js';
 	import Composer from '#lib/chat/Composer.svelte';
 	import Message, { type ChatMessage } from '#lib/chat/Message.svelte';
@@ -140,6 +141,7 @@
 	{#if failed}
 		<p class="error">Couldn't load chats</p>
 	{:else}
+		<h3>Select Chat</h3>
 		<nav>
 			{#each chats as chat (chat.id)}
 				<button class="button" class:primary={chat.id === selected} onclick={() => update({ chat: chat.id })}>{chat.name}</button>
@@ -151,14 +153,14 @@
 					{message}
 					flagged={message.flagged}
 					flashing={flashing === message.id}
-					onflag={() => flag(message)}
+					onflag={me.current?.banned ? undefined : () => flag(message)}
 					onreply={() => (replying = message)}
 					onjump={jump}
 				/>
 			{/each}
 		</div>
 		{#if selected !== undefined}
-			<Composer onsend={send} {replying} oncancel={() => (replying = null)} {placeholder} --line-start="4px" />
+			<Composer onsend={send} {replying} oncancel={() => (replying = null)} {placeholder} slowmode={3000} --line-start="4px" />
 		{/if}
 	{/if}
 </div>
@@ -168,6 +170,11 @@
 		display: flex;
 		flex-direction: column;
 		height: calc(100dvh - 84px);
+	}
+
+	h3 {
+		margin: 0 0 8px;
+		font: 18px 'Share Tech', sans-serif;
 	}
 
 	nav {

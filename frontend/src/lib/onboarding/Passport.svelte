@@ -27,8 +27,9 @@
 		error = '',
 		editing = $bindable(false),
 		fold = false,
-		closed = false
-	}: { draft: Character; guild?: Guild | null; onboarding?: boolean; stamping?: boolean; error?: string; editing?: boolean; fold?: boolean; closed?: boolean } = $props();
+		closed = false,
+		readonly = false
+	}: { draft: Character; guild?: Guild | null; onboarding?: boolean; stamping?: boolean; error?: string; editing?: boolean; fold?: boolean; closed?: boolean; readonly?: boolean } = $props();
 
 	let root: HTMLDivElement;
 	let opened = $state(!fold);
@@ -64,25 +65,26 @@
 		</header>
 		<div class="body">
 			<div class="photo">
-				<Headshot bind:features={draft.attributes.features} bind:open={editing} missing={onboarding && !draft.attributes.features.length} />
+				<Headshot bind:features={draft.attributes.features} bind:hue={draft.attributes.hue} bind:open={editing} missing={onboarding && !draft.attributes.features.length} {readonly} />
+				{#if onboarding}<span class="aside pointer">Craft your character!</span>{/if}
 			</div>
 			<div class="fields">
 				<label>
 					<span>Name</span>
-					<input class:missing={missing(draft.handle)} bind:value={draft.handle} maxlength={LIMITS.handle} placeholder="Name your character" autocomplete="off" />
+					<input class:missing={missing(draft.handle)} bind:value={draft.handle} {readonly} maxlength={LIMITS.handle} placeholder="Name your character" autocomplete="off" />
 					{#if error}<em class="error">{error}</em>{/if}
 				</label>
 				<label>
 					<span>Age</span>
-					<input class:missing={missing(draft.attributes.age)} bind:value={draft.attributes.age} maxlength={LIMITS.age} placeholder="Age" autocomplete="off" />
+					<input class:missing={missing(draft.attributes.age)} bind:value={draft.attributes.age} {readonly} maxlength={LIMITS.age} placeholder="Age" autocomplete="off" />
 				</label>
 				<label>
 					<span>Occupation</span>
-					<input class:missing={missing(draft.attributes.occupation)} bind:value={draft.attributes.occupation} maxlength={LIMITS.occupation} placeholder="Occupation" autocomplete="off" />
+					<input class:missing={missing(draft.attributes.occupation)} bind:value={draft.attributes.occupation} {readonly} maxlength={LIMITS.occupation} placeholder="Occupation" autocomplete="off" />
 				</label>
 				<label>
-					<span>Backstory<b>{draft.attributes.backstory.length}/{LIMITS.backstory}</b></span>
-					<textarea class:missing={missing(draft.attributes.backstory)} bind:value={draft.attributes.backstory} maxlength={LIMITS.backstory} rows="3" placeholder="It all started when..."></textarea>
+					<span>Backstory{#if !readonly}<b>{draft.attributes.backstory.length}/{LIMITS.backstory}</b>{/if}</span>
+					<textarea class:missing={missing(draft.attributes.backstory)} bind:value={draft.attributes.backstory} {readonly} maxlength={LIMITS.backstory} rows="3" placeholder="It all started when..."></textarea>
 					{#if onboarding}<span class="aside">Add some pizzazz, feel free to embellish and really play into this character as you go!</span>{/if}
 				</label>
 			</div>
@@ -228,7 +230,12 @@
 		font-weight: 400;
 	}
 
-	label span.aside {
+	.photo {
+		position: relative;
+	}
+
+	label span.aside,
+	.aside {
 		position: absolute;
 		top: 0;
 		left: calc(100% + 4cqw + 28px);
@@ -253,6 +260,19 @@
 		border-left: 1px solid var(--island-border);
 		background: var(--island);
 		transform: rotate(45deg);
+	}
+
+	.pointer {
+		right: calc(100% + 4cqw + 28px);
+		left: auto;
+		width: auto;
+		white-space: nowrap;
+	}
+
+	.pointer::before {
+		right: -7px;
+		left: auto;
+		transform: rotate(-135deg);
 	}
 
 	input,
@@ -315,9 +335,15 @@
 	}
 
 	@media (max-width: 1240px) {
-		label span.aside {
+		label span.aside,
+		.aside {
 			position: static;
 			width: auto;
+		}
+
+		.pointer {
+			margin-top: 8px;
+			white-space: normal;
 		}
 
 		.aside::before {

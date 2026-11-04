@@ -14,6 +14,7 @@
 	import Chat from '#lib/hq/Chat.svelte';
 	import Operations from '#lib/hq/Operations.svelte';
 	import { planner } from '#lib/hq/planner.svelte.js';
+	import Crowd from '#lib/hq/Crowd.svelte';
 	import Profile from '#lib/hq/Profile.svelte';
 	import Resources from '#lib/hq/Resources.svelte';
 	import Konami from '#lib/Konami.svelte';
@@ -205,7 +206,7 @@
 	}
 
 	function onpointermove(event: PointerEvent) {
-		hovering = !docked || mining ? null : over(event);
+		hovering = !docked || mining || (event.target instanceof Element && event.target.closest('.crowd')) ? null : over(event);
 	}
 
 	const wanted = $derived(params().has('map'));
@@ -452,6 +453,7 @@
 	<button class="help" class:spotlit={current?.spots.includes('Help')} aria-label="Help"><img src={image('help-icon')} alt="" /><span class="tip left">Help</span></button>
 	<Resources />
 
+	<Crowd />
 	<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
 	{#if shown && docked}
 		{#if shown === 'mines'}
@@ -789,6 +791,7 @@
 	.outline {
 		position: fixed;
 		inset: 0;
+		z-index: 3;
 		width: 100%;
 		height: 100%;
 		pointer-events: none;
@@ -1058,9 +1061,11 @@
 		position: fixed;
 		top: 50%;
 		left: 50%;
+		z-index: 2;
 		width: calc(100vw / 2);
 		transform: translate(-50%, -50%);
 		filter: drop-shadow(var(--px) 0 var(--table-edge)) drop-shadow(calc(-1 * var(--px)) 0 var(--table-edge))
 			drop-shadow(0 var(--px) var(--table-edge)) drop-shadow(0 calc(-1 * var(--px)) var(--table-edge));
+		pointer-events: none;
 	}
 </style>

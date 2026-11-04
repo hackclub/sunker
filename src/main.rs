@@ -11,6 +11,7 @@ mod moderation;
 mod onboarding;
 mod operations;
 mod orders;
+mod presence;
 mod projects;
 mod propaganda;
 mod styling;
@@ -180,6 +181,7 @@ async fn main() -> std::io::Result<()> {
                 styling::progress,
             ))
             .service((chats::list, chats::messages, chats::create, chats::flag))
+            .service(presence::online)
             .service((
                 moderation::chats,
                 moderation::messages,

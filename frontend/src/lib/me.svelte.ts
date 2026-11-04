@@ -1,9 +1,9 @@
 export type Feature = { shape: string; colour: string; x: number; y: number; rotation: number };
-export type Attributes = { age: string; occupation: string; backstory: string; features: Feature[] };
+export type Attributes = { age: string; occupation: string; backstory: string; features: Feature[]; hue?: number | null };
 export type Character = { handle: string; attributes: Attributes };
 export type Guild = { slug: string; name: string };
 export type Stage = null | 'passport' | 'guild' | 'hq' | 'done';
-export type Me = { stage: Stage; superadmin: boolean; character: Character | null; guild: Guild | null; resources: Record<string, number> };
+export type Me = { stage: Stage; superadmin: boolean; banned: boolean; character: Character | null; guild: Guild | null; resources: Record<string, number> };
 
 export const me = $state<{ current: Me | null }>({ current: null });
 

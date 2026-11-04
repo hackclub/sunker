@@ -1,9 +1,17 @@
 <script lang="ts">
 	import { colour } from '#lib/colors.js';
-	import { FACE, PHOTO, PRIMITIVES, SHAPES, SWATCHES, type Shape } from '#lib/features.js';
+	import { FACE, HUE, PHOTO, PRIMITIVES, SHAPES, SILHOUETTE, SWATCHES, tint, type Shape } from '#lib/features.js';
 	import type { Feature } from '#lib/me.svelte.js';
 
-	let { features = $bindable([]), open = $bindable(false), missing = false }: { features?: Feature[]; open?: boolean; missing?: boolean } = $props();
+	let {
+		features = $bindable([]),
+		hue = $bindable(),
+		open = $bindable(false),
+		missing = false,
+		readonly = false
+	}: { features?: Feature[]; hue?: number | null; open?: boolean; missing?: boolean; readonly?: boolean } = $props();
+
+	const SWEEP = `linear-gradient(to right, ${Array.from({ length: 13 }, (_, i) => tint('avatar', i * 30)).join(', ')})`;
 
 	type Drag = { shape: Shape; colour: string; rotation: number; x: number; y: number; dx: number; dy: number; index: number | null };
 
@@ -15,6 +23,11 @@
 	let unit = $state(1);
 	let suppress = false;
 	let resetting = $state(false);
+
+	$effect.pre(() => {
+		void features;
+		selected = null;
+	});
 
 	function local(x: number, y: number) {
 		const box = photo.getBoundingClientRect();
@@ -133,17 +146,17 @@
 {/snippet}
 
 <div class="headshot">
-	<div class="photo" class:missing role="presentation" bind:this={photo} onpointerdown={() => (suppress = false)}>
-		<button class="trigger" type="button" aria-label={open ? 'Deselect feature' : 'Edit headshot'} aria-expanded={open} {onclick}></button>
+	<div class="photo" class:missing class:readonly role="presentation" bind:this={photo} onpointerdown={() => (suppress = false)}>
+		{#if !readonly}<button class="trigger" type="button" aria-label={open ? 'Deselect feature' : 'Edit headshot'} aria-expanded={open} {onclick}></button>{/if}
 		<svg viewBox="0 0 {PHOTO.width} {PHOTO.height}" aria-hidden={features.length === 0}>
-			<path class="silhouette" d="M 50 22 C 33 22 27 37 27 52 C 27 72 38 86 50 86 C 62 86 73 72 73 52 C 73 37 67 22 50 22 Z M 8 128 C 10 106 24 96 41 92 L 59 92 C 76 96 90 106 92 128 Z" />
+			<path d={SILHOUETTE} style:fill={tint('passport-silhouette', hue ?? HUE)} />
 			{#each features as feature, i (i)}
 				{@const shape = SHAPES.get(feature.shape)}
 				{#if shape && !(drag?.index === i && outside)}
 					<g
 						class="feature"
 						role="button"
-						tabindex="0"
+						tabindex={readonly ? -1 : 0}
 						aria-label={shape.name}
 						transform="translate({feature.x * PHOTO.width} {feature.y * PHOTO.height}) rotate({feature.rotation})"
 						onpointerdown={(event) => hold(event, i)}
@@ -178,6 +191,10 @@
 					</button>
 				{/each}
 			</div>
+			<label class="tone">
+				<span>Character Color</span>
+				<input type="range" min="0" max="359" value={hue ?? HUE} style:--sweep={SWEEP} oninput={(event) => (hue = Number(event.currentTarget.value))} />
+			</label>
 			<div class="swatches" role="radiogroup" aria-label="Colour">
 				{#each SWATCHES as key (key)}
 					<button class="swatch" type="button" role="radio" aria-checked={swatch === key} aria-label="Colour {key.slice(8)}" style:background={colour(key)} onclick={() => (swatch = key)}></button>
@@ -255,15 +272,15 @@
 		pointer-events: none;
 	}
 
-	.silhouette {
-		fill: var(--passport-silhouette);
-	}
-
 	.feature {
 		pointer-events: auto;
 		cursor: grab;
 		touch-action: none;
 		outline: none;
+	}
+
+	.readonly .feature {
+		pointer-events: none;
 	}
 
 	.hit {
@@ -364,6 +381,41 @@
 	.item svg {
 		width: 100%;
 		height: 100%;
+	}
+
+	.tone {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding-top: 8px;
+		border-top: 1px solid var(--island-border);
+	}
+
+	.tone input {
+		width: 100%;
+		height: 12px;
+		margin: 0;
+		border-radius: 6px;
+		background: var(--sweep);
+		appearance: none;
+		cursor: pointer;
+	}
+
+	.tone input::-webkit-slider-thumb {
+		width: 16px;
+		height: 16px;
+		border: 2px solid var(--text);
+		border-radius: 50%;
+		background: var(--island);
+		appearance: none;
+	}
+
+	.tone input::-moz-range-thumb {
+		width: 12px;
+		height: 12px;
+		border: 2px solid var(--text);
+		border-radius: 50%;
+		background: var(--island);
 	}
 
 	.swatches {

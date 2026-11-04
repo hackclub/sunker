@@ -122,6 +122,10 @@
 		await open(id);
 	}
 
+	function remove(id: number, contents: string) {
+		pending = { title: `Delete message #${id}`, description: contents, run: () => act(`/api/admin/moderation/messages/${id}/delete`) };
+	}
+
 	const who = (author: Author) => author.handle ?? author.name ?? `User #${author.id}`;
 
 	$effect(() => {
@@ -169,7 +173,13 @@
 		<div class="messages" bind:this={scroller}>
 			{#if older}<button class="older" onclick={loadOlder}>Load older messages</button>{/if}
 			{#each messages as message (message.id)}
-				<Message {message} flagged={message.flags > 0} flashing={flashing === message.id} onjump={(id) => selected && show(id, selected)}>
+				<Message
+					{message}
+					flagged={message.flags > 0}
+					flashing={flashing === message.id}
+					onjump={(id) => selected && show(id, selected)}
+					ondelete={message.deleted_at ? undefined : () => remove(message.id, message.contents)}
+				>
 					{#snippet meta()}
 						{@render author(message.author)}
 						{#if message.flags}<span class="badge flag">{message.flags} {message.flags === 1 ? 'flag' : 'flags'}</span>{/if}
@@ -196,17 +206,7 @@
 				</button>
 				<div class="actions">
 					<button onclick={() => act(`/api/admin/moderation/messages/${flag.id}/dismiss`)}>Dismiss</button>
-					<button
-						class="danger"
-						onclick={() =>
-							(pending = {
-								title: `Delete message #${flag.id}`,
-								description: flag.contents,
-								run: () => act(`/api/admin/moderation/messages/${flag.id}/delete`)
-							})}
-					>
-						Delete
-					</button>
+					<button class="danger" onclick={() => remove(flag.id, flag.contents)}>Delete</button>
 					{#if data.admin.permissions.ban && !flag.author.banned}
 						<button
 							class="danger"

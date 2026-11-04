@@ -3,6 +3,14 @@ export type Shape = { slug: string; name: string; reach: number; strokes: Stroke
 
 export const PHOTO = { width: 100, height: 128 };
 
+export const HEAD = 'M 50 22 C 33 22 27 37 27 52 C 27 72 38 86 50 86 C 62 86 73 72 73 52 C 73 37 67 22 50 22 Z';
+
+export const HUE = 180;
+
+export const tint = (base: string, hue: number) => `oklch(from var(--${base}) l 0.05 ${hue})`;
+
+export const SILHOUETTE = `${HEAD} M 8 128 C 10 106 24 96 41 92 L 59 92 C 76 96 90 106 92 128 Z`;
+
 const circle = (x: number, y: number, r: number) => `M ${x - r} ${y} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0`;
 
 export const FACE: Shape[] = [

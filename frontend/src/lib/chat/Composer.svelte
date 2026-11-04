@@ -6,13 +6,20 @@
 		replying?: ChatMessage | null;
 		oncancel?: () => void;
 		placeholder?: string;
+		slowmode?: number;
 	};
 
-	let { onsend, replying = null, oncancel, placeholder = 'Send message' }: Props = $props();
+	let { onsend, replying = null, oncancel, placeholder = 'Send message', slowmode = 0 }: Props = $props();
 
 	let contents = $state('');
 	let sending = $state(false);
+	let waiting = $state(0);
 	let field: HTMLTextAreaElement;
+
+	function cool() {
+		waiting = slowmode / 1000;
+		const timer = setInterval(() => --waiting || clearInterval(timer), 1000);
+	}
 
 	$effect(() => {
 		if (replying) field.focus();
@@ -20,12 +27,14 @@
 
 	async function submit() {
 		const text = contents.trim();
-		if (!text || sending) return;
+		if (!text || sending || waiting) return;
 		sending = true;
+		contents = '';
 		try {
 			await onsend(text, replying?.id ?? null);
-			if (contents.trim() === text) contents = '';
+			if (slowmode) cool();
 		} catch {
+			if (!contents.trim()) contents = text;
 		} finally {
 			sending = false;
 		}
@@ -63,8 +72,12 @@
 			}
 		}}
 	></textarea>
-	<button class="send" type="submit" aria-label="Send" disabled={sending || !contents.trim()}>
-		<svg viewBox="0 0 16 16"><path d="M14.5 1.5 7 9M14.5 1.5 10 14.5 7 9 1.5 6z" /></svg>
+	<button class="send" type="submit" aria-label={waiting ? `Slowmode, ${waiting}s left` : 'Send'} disabled={sending || waiting > 0 || !contents.trim()}>
+		{#if waiting}
+			<span class="wait">{waiting}</span>
+		{:else}
+			<svg viewBox="0 0 16 16"><path d="M14.5 1.5 7 9M14.5 1.5 10 14.5 7 9 1.5 6z" /></svg>
+		{/if}
 	</button>
 </form>
 
@@ -138,6 +151,11 @@
 	.send:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+
+	.wait {
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	svg {

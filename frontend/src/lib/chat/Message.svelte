@@ -21,10 +21,11 @@
 		onflag?: () => void;
 		onreply?: () => void;
 		onjump?: (id: number) => void;
+		ondelete?: () => void;
 		meta?: Snippet;
 	};
 
-	let { message, flagged = false, flashing = false, onflag, onreply, onjump, meta }: Props = $props();
+	let { message, flagged = false, flashing = false, onflag, onreply, onjump, ondelete, meta }: Props = $props();
 
 	const time = $derived(new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
 </script>
@@ -54,7 +55,7 @@
 		<time datetime={message.created_at}>{time}</time>
 	</header>
 	<p>{message.contents}</p>
-	{#if onflag || onreply}
+	{#if onflag || onreply || ondelete}
 		<div class="tools">
 			{#if onreply}
 				<button aria-label="Reply" title="Reply" onclick={onreply}>
@@ -64,6 +65,11 @@
 			{#if onflag}
 				<button class:active={flagged} aria-label={flagged ? 'Unflag' : 'Flag'} title={flagged ? 'Unflag' : 'Flag'} onclick={onflag}>
 					<svg viewBox="0 0 16 16"><path d="M3.5 14.5v-12M3.5 2.5h8l-2 3 2 3h-8" /></svg>
+				</button>
+			{/if}
+			{#if ondelete}
+				<button aria-label="Delete" title="Delete" onclick={ondelete}>
+					<svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.75 9h6.5L12 4.5M6.75 7v4.5M9.25 7v4.5" /></svg>
 				</button>
 			{/if}
 		</div>

@@ -37,7 +37,7 @@
 
 <style>
 	dialog {
-		width: min(960px, calc(100vw - 32px));
+		width: min(var(--width, 960px), calc(100vw - 32px));
 		max-height: calc(100vh - 32px);
 		padding: 0;
 		border: 1px solid var(--island-border);

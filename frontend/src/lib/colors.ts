@@ -21,7 +21,8 @@ export const COLOURS: Record<string, Record<string, string>> = {
 		sky: '#a8d8f0',
 		horizon: '#5a8fc8',
 		ring: '#2e3032',
-		'ring-label': '#b4b7b9'
+		'ring-label': '#b4b7b9',
+		avatar: '#9da1a8'
 	},
 	Map: {
 		'map-hostile': '#d42c2c',

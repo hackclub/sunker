@@ -33,10 +33,17 @@ pub async fn user_id(req: &HttpRequest, pool: &PgPool) -> sqlx::Result<Option<i3
     let Ok(data) = get_auth_data_with_token(&token).await else {
         return Ok(None);
     };
-    sqlx::query_scalar("SELECT id FROM \"user\" WHERE hca_id = $1 AND deleted_at IS NULL")
-        .bind(&data.id)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_scalar(
+        "WITH found AS (SELECT id, last_seen_at FROM \"user\" WHERE hca_id = $1 AND deleted_at IS NULL),
+              seen AS (
+                  UPDATE \"user\" SET last_seen_at = now() FROM found
+                  WHERE \"user\".id = found.id AND (found.last_seen_at IS NULL OR found.last_seen_at < now() - interval '30 seconds')
+              )
+         SELECT id FROM found",
+    )
+    .bind(&data.id)
+    .fetch_optional(pool)
+    .await
 }
 
 async fn save_user(pool: &PgPool, token: &str, referral: Option<&str>) -> anyhow::Result<()> {

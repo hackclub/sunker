@@ -41,6 +41,7 @@ pub async fn me(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
         let mut me: Value = sqlx::query_scalar(
             "SELECT jsonb_build_object(
                  'stage', u.onboarding_step,
+                 'banned', u.is_banned,
                  'character', (SELECT jsonb_build_object('handle', c.handle, 'attributes', c.attributes) FROM character c WHERE c.user_id = u.id),
                  'guild', (SELECT jsonb_build_object('slug', g.slug, 'name', g.name) FROM guild g WHERE g.id = u.guild_id),
                  'resources', (SELECT jsonb_build_object(
@@ -114,6 +115,7 @@ pub async fn save_character(req: HttpRequest, body: web::Json<Value>, pool: web:
                 "occupation": text(&body, "occupation", OCCUPATION_LIMIT, "Occupation")?,
                 "backstory": text(&body, "backstory", BACKSTORY_LIMIT, "Backstory")?,
                 "features": features(&body)?,
+                "hue": body["hue"].as_f64().filter(|hue| hue.is_finite()).map(|hue| hue.rem_euclid(360.0).round()),
             }),
         ))
     })();
