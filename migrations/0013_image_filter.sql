@@ -1,0 +1,1 @@
+ALTER TABLE image_slot ADD COLUMN smooth BOOLEAN NOT NULL DEFAULT false;

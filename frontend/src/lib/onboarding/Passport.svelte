@@ -17,7 +17,7 @@
 <script lang="ts">
 	import Headshot from '#lib/onboarding/Headshot.svelte';
 	import type { Character, Guild } from '#lib/me.svelte.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, rendering } from '#lib/styles.svelte.js';
 
 	let {
 		draft = $bindable(),
@@ -56,7 +56,7 @@
 	<div class="upper" class:shut={!opened || closed} style:--fold="{FOLD}ms" style:--fit={coverHeight && pageHeight ? pageHeight / coverHeight : 1} bind:offsetHeight={coverHeight}>
 		<div class="guilloche" style:--guilloche={GUILLOCHE}></div>
 		{#if guild}
-			<img class="stamp" class:stamping style:animation-delay={fold ? `${FOLD}ms` : null} src={image(`${guild.slug}-patch`)} alt="Guild of {guild.name} stamp" />
+			<img class="stamp" class:stamping style:animation-delay={fold ? `${FOLD}ms` : null} src={image(`${guild.slug}-patch`)} alt="Guild of {guild.name} stamp" style:image-rendering={rendering(`${guild.slug}-patch`)} />
 		{/if}
 	</div>
 
@@ -150,7 +150,6 @@
 		width: 28cqw;
 		opacity: 0.88;
 		transform: rotate(-12deg);
-		image-rendering: pixelated;
 	}
 
 	.stamping {

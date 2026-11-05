@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { colour, css } from '#lib/colors.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, smooth } from '#lib/styles.svelte.js';
 
 	const PIXEL = 3;
 	const EYE = 1.7;
@@ -174,6 +174,7 @@
 			tinted.fillRect(0, 0, tint.width, tint.height);
 			tinted.globalCompositeOperation = 'source-over';
 			const flat = Math.max(body.roofs[-1], body.roofs[1]) - body.top;
+			context.imageSmoothingEnabled = smooth(BUILDINGS[sprites.indexOf(sprite)]);
 			const [start, end] = [across(x, z), across(x, far)].sort((a, b) => a - b);
 			for (let column = Math.floor(start); column < Math.ceil(end); column++) {
 				const depthAt = (focal * x) / (column + 0.5 - w / 2);

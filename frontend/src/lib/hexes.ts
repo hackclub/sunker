@@ -2,7 +2,7 @@ import { BASES, LIBRARY, NAMES, NOISE } from '#lib/bases.js';
 import { MAP, css, rgb, vec3 } from '#lib/colors.js';
 import { CORNERS, FRONT, HEIGHT, WIDTH } from '#lib/map.js';
 import { perlin } from '#lib/noise.js';
-import { image, styles } from '#lib/styles.svelte.js';
+import { image, smooth, styles } from '#lib/styles.svelte.js';
 
 export const STRIDE = 18;
 export const THIN = 1;
@@ -692,7 +692,7 @@ export function link(gl: WebGL2RenderingContext, vertex: string, fragment: strin
 }
 
 export const look = () =>
-	[FRAGMENT(), TREE_VERTEX(), TREE_FRAGMENT(), RAMP_FRAGMENT(), FOG_FRAGMENT(), MAP.background, ...SPRITES.map(({ name }) => image(name))].join('\n');
+	[FRAGMENT(), TREE_VERTEX(), TREE_FRAGMENT(), RAMP_FRAGMENT(), FOG_FRAGMENT(), MAP.background, ...SPRITES.map(({ name }) => `${image(name)} ${smooth(name)}`)].join('\n');
 
 export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
@@ -802,6 +802,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sprite);
 			gl.generateMipmap(gl.TEXTURE_2D);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, smooth(name) ? gl.LINEAR : gl.NEAREST);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 			self.draw();
@@ -1302,6 +1303,7 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 				const { size: [width, height], anchor, unit, flat } = shapes[Math.round(kind) - 2];
 				if (!sprite.complete || !sprite.naturalWidth) continue;
 				context.save();
+				context.imageSmoothingEnabled = smooth(SPRITES[Math.round(kind) - 2].name);
 				if (flat) {
 					const corner = (u: number, v: number) => project(x + (u - anchor[0]) * unit * size, y - lift + (v - anchor[1]) * unit * size);
 					const [origin, right, down] = [corner(0, 0), corner(width, 0), corner(0, height)];

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { me } from '#lib/me.svelte.js';
 	import { RESOURCES } from '#lib/resources.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, rendering } from '#lib/styles.svelte.js';
 
 	let open = $state(false);
 
@@ -13,14 +13,14 @@
 <section class="resources" class:open aria-label="Resources">
 	<button type="button" class="row" aria-expanded={open} onclick={() => (open = !open)}>
 		{#each RESOURCES as resource (resource.key)}
-			<span class="count" title={resource.name}><img src={image(resource.icon)} alt={resource.name} />{amount(resource.key)}</span>
+			<span class="count" title={resource.name}><img src={image(resource.icon)} alt={resource.name} style:image-rendering={rendering(resource.icon)} />{amount(resource.key)}</span>
 		{/each}
 	</button>
 	<div class="details">
 		<ul>
 			{#each RESOURCES as resource (resource.key)}
 				<li>
-					<img src={image(resource.icon)} alt="" />
+					<img src={image(resource.icon)} alt="" style:image-rendering={rendering(resource.icon)} />
 					<div>
 						<strong>{resource.name}</strong>
 						<p>{resource.description}</p>
@@ -68,7 +68,6 @@
 	img {
 		width: 32px;
 		height: 32px;
-		image-rendering: pixelated;
 	}
 
 	.details {

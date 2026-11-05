@@ -1,7 +1,7 @@
 <script lang="ts">
 	import SidePanel, { DIALOG_WIDTH, SPLIT, offset } from '#lib/SidePanel.svelte';
 	import { PALETTE } from '#lib/colors.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, rendering, smooth } from '#lib/styles.svelte.js';
 	import WorldMap from '#lib/WorldMap.svelte';
 	import Mines, { bake } from '#lib/Mines.svelte';
 	import { params, update } from '#lib/url.svelte.js';
@@ -159,7 +159,6 @@
 	const BUILDINGS = ['building1', 'building2'];
 	const SCALE = 1 / 768;
 	const WIDTH = 128;
-	const HEIGHT = 16;
 	const SPACING = 96;
 	const MULLION = 3;
 	const RAIL = 5;
@@ -232,6 +231,7 @@
 	let floor: HTMLCanvasElement;
 	let windows: HTMLCanvasElement;
 	let images: HTMLImageElement[] = $state([]);
+	const blend = $derived(PLANKS.every(smooth));
 	let buildings: HTMLImageElement[] = $state([]);
 
 	function load(src: string) {
@@ -415,25 +415,27 @@
 		if (!images.length) return;
 		const { width, height, project, far } = view;
 		const near = project(height - 1);
+		const [{ naturalWidth: plankWidth, naturalHeight: plankHeight }] = images;
+		const density = plankWidth / WIDTH;
 		const flat = document.createElement('canvas');
-		flat.width = Math.ceil(width * far.stretch) + 2;
-		flat.height = Math.ceil(far.distance - near.distance) + 2;
+		flat.width = Math.ceil(width * far.stretch * density) + 2;
+		flat.height = Math.ceil((far.distance - near.distance) * density) + 2;
 		const flatContext = flat.getContext('2d')!;
-		for (let row = 0; row * HEIGHT < flat.height; row++) {
-			const offset = Math.round(((row % 5) * WIDTH) / 5) - WIDTH;
-			for (let col = 0; col * WIDTH + offset < flat.width; col++) {
-				flatContext.drawImage(images[pick(row, col, images.length)], col * WIDTH + offset, row * HEIGHT);
+		for (let row = 0; row * plankHeight < flat.height; row++) {
+			const offset = Math.round(((row % 5) * plankWidth) / 5) - plankWidth;
+			for (let col = 0; col * plankWidth + offset < flat.width; col++) {
+				flatContext.drawImage(images[pick(row, col, images.length)], col * plankWidth + offset, row * plankHeight);
 			}
 		}
 
 		floor.width = width;
 		floor.height = height;
 		const context = floor.getContext('2d')!;
-		context.imageSmoothingEnabled = SMOOTH;
+		context.imageSmoothingEnabled = blend;
 		for (let y = wall; y < height; y++) {
 			const { distance, stretch } = project(y);
-			const source = SMOOTH ? far.distance - distance : Math.floor(far.distance - distance);
-			context.drawImage(flat, flat.width / 2 - (width / 2) * stretch, source, width * stretch, 1, 0, y, width, 1);
+			const source = blend ? (far.distance - distance) * density : Math.floor((far.distance - distance) * density);
+			context.drawImage(flat, flat.width / 2 - (width / 2) * stretch * density, source, width * stretch * density, 1, 0, y, width, 1);
 		}
 	});
 
@@ -457,7 +459,6 @@
 		backdrop.width = width + margin * 2;
 		backdrop.height = wall;
 		const backdropContext = backdrop.getContext('2d')!;
-		backdropContext.imageSmoothingEnabled = SMOOTH;
 
 		const sky = backdropContext.createRadialGradient(backdrop.width / 2, wall * 1.5, 0, backdrop.width / 2, wall * 1.5, wall * 2);
 		sky.addColorStop(0, PALETTE.sky);
@@ -475,6 +476,7 @@
 		for (const { image, size, x } of skyline.sort((a, b) => a.size - b.size)) {
 			const left = snap(x);
 			const top = snap(wall - image.height * size);
+			backdropContext.imageSmoothingEnabled = smooth(BUILDINGS[buildings.indexOf(image)]);
 			backdropContext.drawImage(image, left, top, snap(left + image.width * size) - left, wall - top);
 		}
 
@@ -528,7 +530,7 @@
 	style:--vv-bottom="{viewportBottom}px"
 >
 	<div class="insets" bind:this={probe}></div>
-	<canvas class="floor" class:smooth={SMOOTH} bind:this={floor}></canvas>
+	<canvas class="floor" class:smooth={blend} bind:this={floor}></canvas>
 	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
 	<div class="corner" class:touring={!!current} class:away={!docked} style:top="{wall / ratio}px" style:--guide={layout.guide && `${layout.guide.size}px`}>
@@ -540,7 +542,7 @@
 		{/if}
 	</div>
 
-	<button class="help" class:spotlit={current?.spots.includes('Help')} aria-label="Help"><img src={image('help-icon')} alt="" /><span class="tip left">Help</span></button>
+	<button class="help" class:spotlit={current?.spots.includes('Help')} aria-label="Help"><img src={image('help-icon')} alt="" style:--rendering={rendering('help-icon')} /><span class="tip left">Help</span></button>
 	<Resources />
 
 	<Crowd shape={layout.crowd} avoid={layout.guide && { x: 4, y: layout.guide.top - 14, width: layout.guide.size + 8, height: layout.guide.size + 14 }} />
@@ -553,9 +555,10 @@
 			style:width="{layout.box.width}px"
 			style:height="{layout.box.height}px"
 			style:border-image-source="url({image('table')})"
+			style:--rendering={rendering('table')}
 		></div>
 	{:else}
-		<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
+		<img class="table" src={image('table')} alt="" style:--rendering={rendering('table')} style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
 	{/if}
 	{#if shown && docked}
 		{#if shown === 'mines'}
@@ -624,7 +627,7 @@
 				{disabled}
 				onclick={() => toggle(side, i)}
 			>
-				<img src={image(icon)} alt="" />
+				<img src={image(icon)} alt="" style:--rendering={rendering(icon)} />
 				{#if dot}<span class="dot"></span>{/if}
 				<span class="tip {side}">{label}</span>
 			</button>
@@ -932,7 +935,7 @@
 	}
 
 	img {
-		image-rendering: pixelated;
+		image-rendering: var(--rendering);
 	}
 
 	.outline {
@@ -1338,7 +1341,7 @@
 		border-image-slice: 56 130 75 130 fill;
 		border-image-width: 1;
 		border-image-repeat: stretch;
-		image-rendering: pixelated;
+		image-rendering: var(--rendering);
 	}
 
 	.insets {

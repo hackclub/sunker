@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ENEMIES, enemyName, type Force } from '#lib/map.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, rendering } from '#lib/styles.svelte.js';
 
 	let { force, disabled = false, available, onchange }: { force: Force; disabled?: boolean; available?: Force; onchange: (force: Force) => void } = $props();
 
@@ -15,7 +15,7 @@
 <div class="force">
 	{#each ENEMIES as enemy (enemy)}
 		<label title={enemyName(enemy)}>
-			<img src={image(enemy)} alt="" />
+			<img src={image(enemy)} alt="" style:image-rendering={rendering(enemy)} />
 			<input type="number" inputmode="numeric" min="0" value={force[enemy] ?? 0} {disabled} oninput={(event) => set(enemy, Number(event.currentTarget.value))} />
 			<span>{enemyName(enemy)}{#if available}<em> / {available[enemy] ?? 0}</em>{/if}</span>
 		</label>
@@ -44,7 +44,6 @@
 	img {
 		grid-row: span 2;
 		width: 22px;
-		image-rendering: pixelated;
 	}
 
 	input {

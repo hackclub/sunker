@@ -21,7 +21,7 @@ export type Frame = {
 export interface Pit {
 	mesh(data: Float32Array): void;
 	glyphs(frames: TexImageSource[][]): void;
-	sprite(k: number, image: TexImageSource): void;
+	sprite(k: number, image: TexImageSource, smooth: boolean): void;
 	draw(frame: Frame): void;
 	destroy(): void;
 }
@@ -129,13 +129,13 @@ export function pit(canvas: HTMLCanvasElement, bands: number): Pit | null {
 			if (anisotropy) gl.texParameterf(gl.TEXTURE_2D_ARRAY, anisotropy.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(anisotropy.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
 			ready = true;
 		},
-		sprite(k, image) {
+		sprite(k, image, smooth) {
 			const texture = (sprites[k] ??= gl.createTexture());
 			gl.activeTexture(gl.TEXTURE1);
 			gl.bindTexture(gl.TEXTURE_2D, texture);
 			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, smooth ? gl.LINEAR : gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, smooth ? gl.LINEAR : gl.NEAREST);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		},

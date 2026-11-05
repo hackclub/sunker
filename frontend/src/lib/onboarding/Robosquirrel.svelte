@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Spring } from 'svelte/motion';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, rendering } from '#lib/styles.svelte.js';
 
 	let { tilt = 0, mode = 'float', size, onclick }: { tilt?: number; mode?: 'float' | 'bob'; size: string; onclick?: () => void } = $props();
 
@@ -11,9 +11,9 @@
 </script>
 
 {#snippet parts()}
-	<img class="body" src={image('robosquirrel-body')} alt="" />
+	<img class="body" src={image('robosquirrel-body')} alt="" style:image-rendering={rendering('robosquirrel-body')} />
 	<span class="neck" class:bob={mode === 'bob'}>
-		<img class="head" src={image('robosquirrel-head')} alt="" style:transform="rotate({turn.current}deg)" />
+		<img class="head" src={image('robosquirrel-head')} alt="" style:image-rendering={rendering('robosquirrel-head')} style:transform="rotate({turn.current}deg)" />
 	</span>
 {/snippet}
 
@@ -44,7 +44,6 @@
 
 	img {
 		position: absolute;
-		image-rendering: pixelated;
 		pointer-events: none;
 	}
 

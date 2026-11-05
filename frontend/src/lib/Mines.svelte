@@ -88,7 +88,7 @@
 	import { request } from '#lib/joel/joel.js';
 	import type { Prize, Contract } from '#lib/mines.js';
 	import { load } from '#lib/projects.svelte.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, rendering, smooth } from '#lib/styles.svelte.js';
 	import { params, update } from '#lib/url.svelte.js';
 	import { FLAT, GRADIENT, SPRITE, FACE, pit, type Call, type Pit } from '#lib/pit.js';
 
@@ -182,6 +182,20 @@
 	});
 
 	$effect(() => {
+		const gl = painter;
+		if (!gl) return;
+		BUILDINGS.forEach((name, k) => {
+			const filtered = smooth(name);
+			const sprite = new Image();
+			sprite.onload = () => {
+				gl.sprite(k, sprite, filtered);
+				aspects[k] = sprite.naturalWidth / sprite.naturalHeight;
+			};
+			sprite.src = image(name);
+		});
+	});
+
+	$effect(() => {
 		if (gpu || still) return;
 		const id = setInterval(() => tick++, STEP);
 		return () => clearInterval(id);
@@ -198,14 +212,6 @@
 		const lost = () => (gpu = false);
 		surface.addEventListener('webglcontextlost', lost);
 		painter = gl;
-		BUILDINGS.forEach((name, k) => {
-			const sprite = new Image();
-			sprite.onload = () => {
-				gl.sprite(k, sprite);
-				aspects[k] = sprite.naturalWidth / sprite.naturalHeight;
-			};
-			sprite.src = image(name);
-		});
 		return () => {
 			surface.removeEventListener('webglcontextlost', lost);
 			painter = undefined;
@@ -510,7 +516,7 @@
 			<div class="world" style:transform={drone(DEPTH)} in:fly|global out:fly|global={{ back: true }}>
 				<div class="sky" style:width="{SKY[0] * unit}px" style:height="{SKY[1] * unit}px" style:transform="rotateY({YAW}deg) translateZ({-SKY[2] * unit}px) translate(-50%, -100%)">
 					{#each TOWERS as [x, height], i}
-						<img class="tower" src={image(BUILDINGS[i % BUILDINGS.length])} alt="" style:left="{(SKY[0] / 2 + x) * unit}px" style:height="{height * unit}px" />
+						<img class="tower" src={image(BUILDINGS[i % BUILDINGS.length])} alt="" style:image-rendering={rendering(BUILDINGS[i % BUILDINGS.length])} style:left="{(SKY[0] / 2 + x) * unit}px" style:height="{height * unit}px" />
 					{/each}
 				</div>
 				<div class="ledge" style:--ledge={tint(1)} style:width={rim.width} style:height={rim.height} style:clip-path={rim.clip} style:transform={rim.transform}></div>
@@ -719,7 +725,6 @@
 	.tower {
 		position: absolute;
 		bottom: 0;
-		image-rendering: pixelated;
 		transform: translateX(-50%);
 	}
 

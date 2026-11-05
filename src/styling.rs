@@ -147,8 +147,11 @@ async fn log(tx: &mut Transaction<'_, Postgres>, admin: i32, action: &str, summa
 
 pub async fn reload(pool: &PgPool) -> sqlx::Result<()> {
     let _turn = RELOADING.lock().await;
-    let images: Vec<(String, i32, String, i32, i32)> =
-        sqlx::query_as("SELECT slug, id, content_type, width, height FROM image WHERE active").fetch_all(pool).await?;
+    let images: Vec<(String, i32, String, i32, i32, bool)> = sqlx::query_as(
+        "SELECT i.slug, i.id, i.content_type, i.width, i.height, s.smooth FROM image i JOIN image_slot s ON s.slug = i.slug WHERE i.active",
+    )
+    .fetch_all(pool)
+    .await?;
     let colours: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM colour WHERE active").fetch_all(pool).await?;
     let mut kept: HashMap<i32, web::Bytes> = {
         let cache = CACHE.read().unwrap();
@@ -162,7 +165,7 @@ pub async fn reload(pool: &PgPool) -> sqlx::Result<()> {
     let listing = json!({
         "images": images
             .iter()
-            .map(|(slug, id, _, width, height)| (slug.clone(), json!({ "id": id, "width": width, "height": height })))
+            .map(|(slug, id, _, width, height, smooth)| (slug.clone(), json!({ "id": id, "width": width, "height": height, "smooth": smooth })))
             .collect::<Map<_, _>>(),
         "colours": colours.into_iter().map(|(key, value)| (key, Value::String(value))).collect::<Map<_, _>>(),
     });
@@ -294,7 +297,7 @@ pub async fn overview(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse
     let styling: sqlx::Result<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT jsonb_build_object(
              'slots', (SELECT coalesce(jsonb_agg(jsonb_build_object(
-                 'slug', s.slug, 'name', s.name, 'brief', s.brief, 'width', s.width, 'height', s.height,
+                 'slug', s.slug, 'name', s.name, 'brief', s.brief, 'width', s.width, 'height', s.height, 'smooth', s.smooth,
                  'built_in', s.built_in, 'created_at', s.created_at,
                  'versions', (SELECT coalesce(jsonb_agg(jsonb_build_object(
                      'id', i.id, 'width', i.width, 'height', i.height, 'content_type', i.content_type, 'bytes', octet_length(i.data),
@@ -519,6 +522,30 @@ pub async fn save_slot(req: HttpRequest, slug: web::Path<String>, body: web::Jso
     done(&pool, "saving an image brief", outcome).await
 }
 
+#[put("/api/admin/styling/slots/{slug}/filter")]
+pub async fn set_filter(req: HttpRequest, slug: web::Path<String>, body: web::Json<Value>, pool: web::Data<PgPool>) -> HttpResponse {
+    let admin = match admin::require(&req, &pool, Permission::Styling).await {
+        Ok(admin) => admin,
+        Err(response) => return response,
+    };
+    let Some(smooth) = body["smooth"].as_bool() else {
+        return HttpResponse::BadRequest().body("smooth must be true or false");
+    };
+    let outcome: Outcome = async {
+        let mut tx = pool.begin().await?;
+        let saved = sqlx::query("UPDATE image_slot SET smooth = $2 WHERE slug = $1").bind(slug.as_str()).bind(smooth).execute(&mut *tx).await?;
+        if saved.rows_affected() == 0 {
+            return Ok(Err(HttpResponse::NotFound().finish()));
+        }
+        let filtering = if smooth { "interpolated" } else { "nearest" };
+        log(&mut tx, admin.id, "styling_filter", format!("Set the {slug} image to {filtering} filtering")).await?;
+        tx.commit().await?;
+        Ok(Ok(()))
+    }
+    .await;
+    done(&pool, "setting image filtering", outcome).await
+}
+
 #[delete("/api/admin/styling/slots/{slug}")]
 pub async fn remove_slot(req: HttpRequest, slug: web::Path<String>, pool: web::Data<PgPool>) -> HttpResponse {
     let admin = match admin::require(&req, &pool, Permission::Styling).await {
@@ -591,7 +618,7 @@ pub async fn import(req: HttpRequest, body: web::Json<Value>, pool: web::Data<Pg
             return HttpResponse::BadRequest().body(format!("{slug} isn't an image name"));
         }
         match slot_fields(slot) {
-            Ok(fields) => slots.push((slug, fields)),
+            Ok(fields) => slots.push((slug, fields, slot["smooth"].as_bool())),
             Err(response) => return response,
         }
     }
@@ -600,10 +627,10 @@ pub async fn import(req: HttpRequest, body: web::Json<Value>, pool: web::Data<Pg
         for (key, value) in &colours {
             apply_colour(&mut tx, admin.id, key, value).await?;
         }
-        for (slug, (name, brief, width, height)) in &slots {
+        for (slug, (name, brief, width, height), smooth) in &slots {
             sqlx::query(
-                "INSERT INTO image_slot (slug, name, brief, width, height, declared_by) VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (slug) DO UPDATE SET name = $2, brief = $3, width = $4, height = $5",
+                "INSERT INTO image_slot (slug, name, brief, width, height, declared_by, smooth) VALUES ($1, $2, $3, $4, $5, $6, coalesce($7, true))
+                 ON CONFLICT (slug) DO UPDATE SET name = $2, brief = $3, width = $4, height = $5, smooth = coalesce($7, image_slot.smooth)",
             )
             .bind(slug)
             .bind(name)
@@ -611,6 +638,7 @@ pub async fn import(req: HttpRequest, body: web::Json<Value>, pool: web::Data<Pg
             .bind(width)
             .bind(height)
             .bind(admin.id)
+            .bind(smooth)
             .execute(&mut *tx)
             .await?;
         }

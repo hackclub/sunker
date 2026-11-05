@@ -1,4 +1,4 @@
-type Manifest = { images: Record<string, { id: number; width: number; height: number }>; colours: Record<string, string> };
+type Manifest = { images: Record<string, { id: number; width: number; height: number; smooth: boolean }>; colours: Record<string, string> };
 
 export const styles = $state<Manifest & { revision: number }>({ images: {}, colours: {}, revision: 0 });
 
@@ -41,3 +41,7 @@ export const image = (slug: string) => {
 	const entry = styles.images[slug];
 	return `/api/styling/images/${slug}${entry ? `?v=${entry.id}` : ''}`;
 };
+
+export const smooth = (slug: string) => styles.images[slug]?.smooth ?? false;
+
+export const rendering = (slug: string) => (smooth(slug) ? 'auto' : 'pixelated');

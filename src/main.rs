@@ -186,6 +186,7 @@ async fn main() -> std::io::Result<()> {
                 styling::remove_version,
                 styling::declare,
                 styling::save_slot,
+                styling::set_filter,
                 styling::remove_slot,
                 styling::set_colour,
                 styling::import,

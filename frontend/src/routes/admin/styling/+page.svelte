@@ -9,7 +9,7 @@
 
 	type Person = { id: number; name: string | null } | null;
 	type Version = { id: number; width: number; height: number; content_type: string; bytes: number; original: boolean; active: boolean; created_at: string; uploaded_by: Person };
-	type Slot = { slug: string; name: string; brief: string; width: number | null; height: number | null; built_in: boolean; created_at: string; versions: Version[] };
+	type Slot = { slug: string; name: string; brief: string; width: number | null; height: number | null; smooth: boolean; built_in: boolean; created_at: string; versions: Version[] };
 	type Change = { id: number; value: string; active: boolean; created_at: string; set_by: Person };
 	type Styling = { slots: Slot[]; colours: Record<string, Change[]>; progress: Record<string, { at: string; by: Person }> };
 	type Filter = 'all' | 'todo' | 'done';
@@ -18,6 +18,10 @@
 		{ value: 'all', label: 'All' },
 		{ value: 'todo', label: 'To do' },
 		{ value: 'done', label: 'Completed' }
+	];
+	const FILTERING: { value: 'nearest' | 'interpolated'; label: string }[] = [
+		{ value: 'nearest', label: 'Nearest' },
+		{ value: 'interpolated', label: 'Interpolated' }
 	];
 
 	let styling = $state<Styling | null>(null);
@@ -134,7 +138,7 @@
 	function save() {
 		const file = {
 			colours: Object.fromEntries(Object.keys(DEFAULTS).map((key) => [key, current(key)])),
-			slots: styling!.slots.map(({ slug, name, brief, width, height }) => ({ slug, name, brief, width, height }))
+			slots: styling!.slots.map(({ slug, name, brief, width, height, smooth }) => ({ slug, name, brief, width, height, smooth }))
 		};
 		const link = document.createElement('a');
 		link.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, '\t')], { type: 'application/json' }));
@@ -145,7 +149,7 @@
 
 	async function restore(file: File | undefined) {
 		if (!file || !styling) return;
-		let data: { colours?: Record<string, string>; slots?: Pick<Slot, 'slug' | 'name' | 'brief' | 'width' | 'height'>[] };
+		let data: { colours?: Record<string, string>; slots?: (Pick<Slot, 'slug' | 'name' | 'brief' | 'width' | 'height'> & { smooth?: boolean })[] };
 		try {
 			data = JSON.parse(await file.text());
 		} catch {
@@ -161,7 +165,7 @@
 		);
 		const slots = (data.slots ?? []).filter((s) => {
 			const old = styling!.slots.find((o) => o.slug === s.slug);
-			return !old || old.name !== s.name || old.brief !== s.brief || old.width !== s.width || old.height !== s.height;
+			return !old || old.name !== s.name || old.brief !== s.brief || old.width !== s.width || old.height !== s.height || (s.smooth !== undefined && old.smooth !== s.smooth);
 		});
 		if (Object.keys(colours).length || slots.length) act(() => request('POST', '/api/admin/styling/import', { colours, slots }));
 	}
@@ -211,7 +215,7 @@
 					<button class="card" onclick={() => open(s)}>
 						<div class="preview">
 							{#if version}
-								<img src="/api/admin/styling/versions/{version.id}" alt="" />
+								<img src="/api/admin/styling/versions/{version.id}" alt="" style:image-rendering={s.smooth ? 'auto' : 'pixelated'} />
 							{:else}
 								<span class="muted">Not drawn yet</span>
 							{/if}
@@ -297,7 +301,7 @@
 		<div class="detail">
 			<div class="stage">
 				{#if version}
-					<img src="/api/admin/styling/versions/{version.id}" alt={slot.name} />
+					<img src="/api/admin/styling/versions/{version.id}" alt={slot.name} style:image-rendering={slot.smooth ? 'auto' : 'pixelated'} />
 				{:else}
 					<span class="muted">Not drawn yet</span>
 				{/if}
@@ -307,6 +311,12 @@
 				<p class="muted">
 					{version ? `In use: ${version.width}x${version.height}, ${kilobytes(version.bytes)}` : 'Nothing uploaded yet'}{size ? `. Expected ${size[0]}x${size[1]}` : ''}
 				</p>
+				<Segmented
+					options={FILTERING}
+					value={slot.smooth ? 'interpolated' : 'nearest'}
+					label="Filtering"
+					onchange={(value) => act(() => request('PUT', `/api/admin/styling/slots/${slot.slug}/filter`, { smooth: value === 'interpolated' }))}
+				/>
 				<label class="button primary upload" class:disabled={busy}>
 					Upload new version
 					<input type="file" accept="image/png,image/webp,image/gif" disabled={busy} onchange={(event) => (choose(event.currentTarget.files?.[0]), (event.currentTarget.value = ''))} />
@@ -329,7 +339,7 @@
 		<ul class="versions">
 			{#each slot.versions as v (v.id)}
 				<li class:current={v.active}>
-					<img src="/api/admin/styling/versions/{v.id}" alt="" />
+					<img src="/api/admin/styling/versions/{v.id}" alt="" style:image-rendering={slot.smooth ? 'auto' : 'pixelated'} />
 					<div class="grow">
 						<strong>{v.original ? 'Original' : `Version #${v.id}`}</strong>
 						{#if v.active}<span class="done">In use</span>{/if}
@@ -590,7 +600,6 @@
 	.stage img {
 		max-width: 100%;
 		max-height: 100%;
-		image-rendering: pixelated;
 	}
 
 	.preview img {
@@ -896,6 +905,10 @@
 		gap: 12px;
 	}
 
+	.side :global(.segmented button) {
+		flex: 1;
+	}
+
 	.brief {
 		margin: 0;
 		white-space: pre-wrap;
@@ -968,7 +981,6 @@
 		width: 48px;
 		height: 48px;
 		object-fit: contain;
-		image-rendering: pixelated;
 	}
 
 	.versions strong {

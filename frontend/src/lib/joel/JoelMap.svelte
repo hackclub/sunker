@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { BASES } from '#lib/bases.js';
 	import { MAP, PALETTE, colour, css } from '#lib/colors.js';
-	import { image } from '#lib/styles.svelte.js';
+	import { image, smooth } from '#lib/styles.svelte.js';
 	import { CORNERS, ENEMIES, WIDTH, bounds, neighbours, type Force, type PlacedTile } from '#lib/map.js';
 	import { forceText, key, placeName, total, type Hex, type OrderKind } from './joel.js';
 
@@ -263,7 +263,7 @@
 					if (image.complete && image.naturalWidth) {
 						const h = icon;
 						const w = (image.naturalWidth / image.naturalHeight) * h;
-						context.imageSmoothingEnabled = false;
+						context.imageSmoothingEnabled = smooth(enemy);
 						context.drawImage(image, cx - w / 2, sy - h * 0.75, w, h);
 					}
 					context.lineWidth = 3;
