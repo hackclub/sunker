@@ -499,4 +499,26 @@
 		border-color: var(--negative);
 		background: var(--negative);
 	}
+
+	@media (pointer: coarse) {
+		.back {
+			min-height: 44px;
+			margin: -8px 0;
+			padding: 0 12px 0 0;
+		}
+
+		.title .name {
+			padding: 10px 6px;
+		}
+
+		.summary {
+			min-height: 44px;
+			align-items: center;
+		}
+
+		.plain {
+			min-height: 44px;
+			padding: 0 16px;
+		}
+	}
 </style>

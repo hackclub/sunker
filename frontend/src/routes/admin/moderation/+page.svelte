@@ -464,4 +464,59 @@
 		padding: 0;
 		color: var(--negative);
 	}
+
+	@media (max-width: 1100px) {
+		.moderation {
+			grid-template-columns: 160px minmax(0, 1fr) 240px;
+		}
+	}
+
+	@media (max-width: 900px), (max-height: 480px) {
+		.moderation {
+			display: flex;
+			flex-direction: column;
+			height: auto;
+			margin: 0;
+		}
+
+		nav {
+			flex-direction: row;
+			align-items: center;
+			padding: 6px 8px;
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: none;
+		}
+
+		nav::-webkit-scrollbar {
+			display: none;
+		}
+
+		nav h2 {
+			margin: 0;
+			white-space: nowrap;
+		}
+
+		nav button {
+			flex-shrink: 0;
+			white-space: nowrap;
+		}
+
+		.chat {
+			height: max(240px, 70dvh);
+		}
+	}
+
+	@media (pointer: coarse) {
+		nav button,
+		.actions button,
+		.confirm button,
+		.older {
+			min-height: 44px;
+		}
+
+		.name {
+			padding: 15px 0;
+		}
+	}
 </style>

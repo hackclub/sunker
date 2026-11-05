@@ -35,6 +35,7 @@
 	let edited = $state<Force | null>(null);
 	let reason = $state('');
 	let saving = $state(false);
+	let card = $state<HTMLElement>();
 
 	const selected = $derived(params().get('tile'));
 	const tile = $derived(selected ? tiles.find((t) => key(t.row, t.col) === selected) : undefined);
@@ -62,6 +63,10 @@
 		void selected;
 		edited = null;
 		reason = '';
+	});
+
+	$effect(() => {
+		if (tile) card?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 	});
 
 	function pick(row: number, col: number) {
@@ -116,7 +121,7 @@
 		</header>
 
 		{#if tile}
-			<section class="card">
+			<section class="card" bind:this={card}>
 				<div class="row spread">
 					<strong>{placeName(names, [tile.row, tile.col] as Hex)}</strong>
 					<button class="button" onclick={() => update({ tile: null }, { replace: true })}>Close</button>
@@ -261,5 +266,21 @@
 
 	.actions .button:disabled {
 		opacity: 0.5;
+	}
+
+	@media (pointer: coarse) {
+		.form input,
+		.form textarea {
+			padding: 8px 10px;
+		}
+
+		.form input {
+			min-height: 44px;
+		}
+
+		.actions .button {
+			min-height: 44px;
+			padding: 0 16px;
+		}
 	}
 </style>

@@ -33,6 +33,8 @@
 
 	let root: HTMLDivElement;
 	let opened = $state(!fold);
+	let coverHeight = $state(0);
+	let pageHeight = $state(0);
 	$effect(() => {
 		if (opened) return;
 		Promise.all([...root.querySelectorAll('img')].map((img) => img.decode().catch(() => {}))).then(() =>
@@ -51,14 +53,14 @@
 </script>
 
 <div class="passport" bind:this={root}>
-	<div class="upper" class:shut={!opened || closed} style:--fold="{FOLD}ms">
+	<div class="upper" class:shut={!opened || closed} style:--fold="{FOLD}ms" style:--fit={coverHeight && pageHeight ? pageHeight / coverHeight : 1} bind:offsetHeight={coverHeight}>
 		<div class="guilloche" style:--guilloche={GUILLOCHE}></div>
 		{#if guild}
 			<img class="stamp" class:stamping style:animation-delay={fold ? `${FOLD}ms` : null} src={image(`${guild.slug}-patch`)} alt="Guild of {guild.name} stamp" />
 		{/if}
 	</div>
 
-	<div class="data">
+	<div class="data" bind:offsetHeight={pageHeight}>
 		<header>
 			<strong>Sunker</strong>
 			<span>Passport</span>
@@ -113,7 +115,7 @@
 		border: 1px solid var(--passport-guilloche);
 		border-radius: 6px 6px 0 0;
 		background: linear-gradient(to bottom, transparent 60%, color-mix(in srgb, var(--passport-ink) 10%, transparent)) var(--passport-paper-shade);
-		transform: perspective(1400px) rotateX(-14deg);
+		transform: perspective(1400px) rotateX(-14deg) scaleY(1);
 		transform-origin: bottom;
 		transform-style: preserve-3d;
 		transition: transform var(--fold) cubic-bezier(0.4, 0, 0.2, 1);
@@ -121,7 +123,7 @@
 	}
 
 	.upper.shut {
-		transform: perspective(1400px) rotateX(-179deg);
+		transform: perspective(1400px) rotateX(-179deg) scaleY(var(--fit));
 	}
 
 	.upper::after {
@@ -303,6 +305,17 @@
 		outline: none;
 	}
 
+	@media (pointer: coarse) {
+		input,
+		textarea {
+			padding: 10px;
+		}
+
+		input {
+			min-height: 44px;
+		}
+	}
+
 	.missing {
 		border-color: var(--passport-missing);
 		box-shadow: 0 0 0 1px var(--passport-missing);
@@ -326,10 +339,11 @@
 	@container (max-width: 380px) {
 		.body {
 			grid-template-columns: 1fr;
+			row-gap: 12px;
 		}
 
 		.photo {
-			width: 50%;
+			width: min(64%, 220px);
 			margin: 0 auto;
 		}
 	}
@@ -348,6 +362,21 @@
 
 		.aside::before {
 			display: none;
+		}
+	}
+
+	@media (max-width: 640px), (pointer: coarse) {
+		.passport {
+			grid-template-rows: auto auto;
+		}
+
+		.upper {
+			height: min(42cqw, 38dvh);
+		}
+
+		.stamp {
+			width: auto;
+			height: 80%;
 		}
 	}
 

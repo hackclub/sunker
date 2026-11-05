@@ -52,6 +52,7 @@
 <style>
 	.custom {
 		display: inline-flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 8px;
 		color: var(--text-muted);
@@ -72,5 +73,11 @@
 	input:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: -1px;
+	}
+
+	@media (pointer: coarse) {
+		input {
+			min-height: 40px;
+		}
 	}
 </style>

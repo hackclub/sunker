@@ -125,4 +125,17 @@
 	label input {
 		margin: 0;
 	}
+
+	@media (pointer: coarse) {
+		label {
+			min-height: 44px;
+			gap: 8px;
+			padding: 0 6px;
+		}
+
+		label input {
+			width: 20px;
+			height: 20px;
+		}
+	}
 </style>

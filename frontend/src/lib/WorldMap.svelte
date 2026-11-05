@@ -14,6 +14,8 @@
 		territory = [],
 		table = false,
 		arrows = true,
+		covered = 0,
+		cleared = 0,
 		selectable = null,
 		selected = null,
 		route = null,
@@ -24,6 +26,8 @@
 		territory?: Territory[];
 		table?: boolean;
 		arrows?: boolean;
+		covered?: number;
+		cleared?: number;
 		selectable?: [number, number][] | null;
 		selected?: [number, number] | null;
 		route?: [number, number][] | null;
@@ -36,9 +40,11 @@
 	const GROVE = 0.4;
 	const SCRIBE = 100;
 	const ZOOM = 4;
+	const TAP = 56;
 	const STEP = Math.SQRT2;
 	const GLIDE = 200;
 	const SWEEP = 0.8;
+	const SNAP = 24;
 	const ROADS = ['highway', 'street'];
 	const roadOf = (tile?: PlacedTile['tile']) => tile?.variants.find((variant) => ROADS.includes(variant)) ?? '';
 	const MIDPOINTS = [[2, -2], [4, 0], [2, 2], [-2, 2], [-4, 0], [-2, -2]];
@@ -54,7 +60,10 @@
 	let hovered = $state.raw<PlacedTile | null>(null);
 	let region = $state<string | null>(null);
 	let pointer = $state({ x: 0, y: 0 });
+	let cardWidth = $state(0);
 	let cardHeight = $state(0);
+	const cardLeft = $derived(Math.max(8, pointer.x + 16 + cardWidth > innerWidth - 8 ? pointer.x - 16 - cardWidth : pointer.x + 16));
+	const cardTop = $derived(Math.max(8, pointer.y + 16 + cardHeight > innerHeight - 8 ? pointer.y - 16 - cardHeight : pointer.y + 16));
 	const choosable = $derived(new Set((selectable ?? []).map(([row, col]) => `${row},${col}`)));
 	const pickable = (tile: PlacedTile | null) => Boolean(tile && choosable.has(`${tile.row},${tile.col}`));
 
@@ -64,6 +73,7 @@
 	let zoom = $state(1);
 	let focus = $state<[number, number] | null>(null);
 	let dragged = false;
+	let touched = false;
 	let grabbing = $state(false);
 	let anchor: [number, number] = [0, 0];
 	let gliding = 0;
@@ -71,9 +81,11 @@
 	const touches = new Map<number, [number, number]>();
 
 	const base = $derived(frame(tiles, innerWidth, innerHeight));
+	const deepest = $derived(base.scale ? Math.max(ZOOM, TAP / (WIDTH * base.scale)) : ZOOM);
 	const plane = $derived(innerWidth && innerHeight ? aim(base, zoom, focus ?? middle(base)) : base);
 	const unproject = $derived(unprojector(plane, innerWidth, innerHeight));
 	const reach = $derived(Math.max(...tiles.map((t) => t.tile.height)) * LIFT);
+	const rest = $derived(selectable && !table && (covered || cleared) ? (cleared + innerHeight - covered) / 2 : 0);
 
 	let flown = $state(false);
 	$effect(() => {
@@ -532,7 +544,7 @@
 	});
 
 	const field = $derived.by(() => {
-		const { rows, cols } = grid(base, innerWidth, innerHeight, reach, tiles, ZOOM);
+		const { rows, cols } = grid(base, innerWidth, innerHeight, reach, tiles, deepest);
 		const hexes = [];
 		for (let row = rows[0]; row <= rows[1]; row++) {
 			for (let col = cols[0]; col <= cols[1]; col++) {
@@ -558,23 +570,23 @@
 	const labelled = (event: Event) => event.target instanceof Element && Boolean(event.target.closest('text'));
 
 	function hold([px, py]: [number, number], [sx, sy]: [number, number], level: number) {
-		const next = Math.max(1, Math.min(ZOOM, level));
+		const next = Math.max(1, Math.min(deepest, level));
 		const [ux, uy] = unproject(sx, sy);
 		const [cx, cy] = middle(plane);
 		const k = zoom / next;
-		focus = confine(base, tiles, innerWidth, innerHeight, next, [px - (ux - cx) * k, py - (uy - cy) * k]);
+		focus = confine(base, tiles, innerWidth, innerHeight, next, [px - (ux - cx) * k, py - (uy - cy) * k], rest);
 		zoom = next;
 	}
 
 	function glide(level: number, goal = middle(plane)) {
 		cancelAnimationFrame(gliding);
 		const [from, origin, start] = [zoom, middle(plane), performance.now()];
-		const target = Math.max(1, Math.min(ZOOM, level));
+		const target = Math.max(1, Math.min(deepest, level));
 		const step = (now: number) => {
 			const t = Math.min(1, (now - start) / GLIDE);
 			const e = 1 - (1 - t) ** 3;
 			zoom = from + (target - from) * e;
-			focus = confine(base, tiles, innerWidth, innerHeight, zoom, [origin[0] + (goal[0] - origin[0]) * e, origin[1] + (goal[1] - origin[1]) * e]);
+			focus = confine(base, tiles, innerWidth, innerHeight, zoom, [origin[0] + (goal[0] - origin[0]) * e, origin[1] + (goal[1] - origin[1]) * e], rest);
 			if (t < 1) gliding = requestAnimationFrame(step);
 		};
 		gliding = requestAnimationFrame(step);
@@ -583,8 +595,25 @@
 	const centroid = (points: [number, number][]): [number, number] => [points.reduce((s, [x]) => s + x, 0) / points.length, points.reduce((s, [, y]) => s + y, 0) / points.length];
 	const spread = (points: [number, number][]) => (points.length > 1 ? Math.hypot(points[0][0] - points[1][0], points[0][1] - points[1][1]) : 1);
 
+	function snap(x: number, y: number) {
+		const exact = pick(x, y);
+		if (pickable(exact)) return exact;
+		const project = projector(plane, innerWidth, innerHeight);
+		let found: PlacedTile | null = null;
+		let nearest = SNAP;
+		for (const key of choosable) {
+			const tile = placed.get(key);
+			if (!tile) continue;
+			const [sx, sy] = project(tile.x, tile.y - tile.tile.height * LIFT);
+			const gap = Math.hypot(sx - x, sy - y);
+			if (gap < nearest) [found, nearest] = [tile, gap];
+		}
+		return found;
+	}
+
 	function onpointerdown(event: PointerEvent) {
 		if (event.button !== 0) return;
+		touched = event.pointerType !== 'mouse';
 		if (!touches.size) {
 			dragged = false;
 			anchor = [event.clientX, event.clientY];
@@ -593,23 +622,25 @@
 	}
 
 	function onpointermove(event: PointerEvent) {
-		pointer = { x: event.clientX, y: event.clientY };
+		if (event.pointerType === 'mouse') pointer = { x: event.clientX, y: event.clientY };
 		const last = touches.get(event.pointerId);
 		if (last) {
 			const before = [...touches.values()];
 			touches.set(event.pointerId, [event.clientX, event.clientY]);
 			const after = [...touches.values()];
-			if (!dragged && (touches.size > 1 || Math.hypot(event.clientX - anchor[0], event.clientY - anchor[1]) > 4)) {
+			if (!dragged && (touches.size > 1 || Math.hypot(event.clientX - anchor[0], event.clientY - anchor[1]) > (event.pointerType === 'mouse' ? 4 : 10))) {
 				dragged = grabbing = true;
 				still = false;
 				region = null;
+				if (touches.size === 1) before[0] = anchor;
 			}
 			if (dragged && !element.hasPointerCapture(event.pointerId) && event.buttons) element.setPointerCapture(event.pointerId);
 			cancelAnimationFrame(gliding);
 			hold(unproject(...centroid(before)), centroid(after), (zoom * spread(after)) / spread(before));
 		}
 		if (!dragged) still = true;
-		hovered = !still || labelled(event) ? null : pick(event.clientX, event.clientY);
+		if (event.pointerType === 'mouse') hovered = !still || labelled(event) ? null : pick(event.clientX, event.clientY);
+		else if (dragged) hovered = null;
 	}
 
 	function onpointerup(event: PointerEvent) {
@@ -621,8 +652,15 @@
 		if (dragged || labelled(event)) return;
 		const tile = pick(event.clientX, event.clientY);
 		if (selectable) {
-			if (tile && pickable(tile)) onpick?.([tile.row, tile.col]);
-		} else if (tile?.tile.variants.includes('mine')) onmine?.();
+			const target = touched ? snap(event.clientX, event.clientY) : tile;
+			if (target && pickable(target)) onpick?.([target.row, target.col]);
+		} else if (tile?.tile.variants.includes('mine')) {
+			onmine?.();
+		} else if (touched) {
+			pointer = { x: event.clientX, y: event.clientY };
+			hovered = tile && tile !== hovered ? tile : null;
+			region = null;
+		}
 	}
 
 	$effect(() => {
@@ -687,7 +725,11 @@
 	$effect(() => {
 		if (!innerWidth || !innerHeight) return;
 		const fit = base;
-		untrack(() => focus && (focus = confine(fit, tiles, innerWidth, innerHeight, zoom, focus)));
+		const limit = deepest;
+		untrack(() => {
+			zoom = Math.min(zoom, limit);
+			if (focus) focus = confine(fit, tiles, innerWidth, innerHeight, zoom, focus, rest);
+		});
 	});
 
 	$effect(() => {
@@ -697,6 +739,25 @@
 		touches.clear();
 		grabbing = false;
 		untrack(() => glide(1, middle(base)));
+	});
+
+	let lowered = false;
+	$effect(() => {
+		const target = rest;
+		if (!innerWidth || !innerHeight) return;
+		untrack(() => {
+			if (!target && !lowered) return;
+			lowered = target > 0;
+			if (!lowered) return glide(zoom);
+			const [cx, cy] = middle(base);
+			const [qx, qy] = unprojector(aim(base, zoom, [cx, cy]), innerWidth, innerHeight)(innerWidth / 2, target);
+			glide(zoom, [2 * cx - qx, 2 * cy - qy]);
+		});
+	});
+
+	$effect(() => {
+		void zoom;
+		untrack(() => touched && (hovered = region = null));
 	});
 
 	$effect(() => {
@@ -823,7 +884,7 @@
 	onpointerup={onpointerup}
 	onpointercancel={onpointerup}
 	onpointerleave={(event) => {
-		hovered = null;
+		if (event.pointerType === 'mouse') hovered = null;
 		onpointerup(event);
 	}}
 	onclick={table ? undefined : onclick}
@@ -855,8 +916,13 @@
 						style:--ink={label.ink}
 						style:--ground={label.ground}
 						role="presentation"
-						onpointerenter={() => (region = still ? label.name : null)}
-						onpointerleave={() => (region = null)}
+						onpointerenter={(event) => (region = still && event.pointerType === 'mouse' ? label.name : null)}
+						onpointerleave={(event) => event.pointerType === 'mouse' && (region = null)}
+						onclick={() => {
+							if (!touched || dragged) return;
+							region = region === label.name ? null : label.name;
+							hovered = null;
+						}}
 					>
 						<textPath href="#region-label-{i}" startOffset="50%" text-anchor="middle">{label.name}</textPath>
 					</text>
@@ -865,7 +931,7 @@
 		</div>
 	{/if}
 	{#if card}
-		<div class="card" class:flipped={pointer.x > innerWidth - 280} class:above={pointer.y + 16 + cardHeight > innerHeight} style:left="{pointer.x}px" style:top="{pointer.y}px" bind:clientHeight={cardHeight}>
+		<div class="card" style:left="{cardLeft}px" style:top="{cardTop}px" bind:clientWidth={cardWidth} bind:clientHeight={cardHeight}>
 			<h2>{card.title}</h2>
 			{#if card.effects.length}
 				<ul>
@@ -892,7 +958,7 @@
 		<button aria-label="Zoom out" disabled={zoom <= 1} onclick={() => glide(STEP ** (Math.ceil(Math.log(zoom) / Math.log(STEP) - 0.01) - 1))}>
 			<svg viewBox="0 0 24 24"><path d="M6 12h12" /></svg>
 		</button>
-		<button aria-label="Zoom in" disabled={zoom >= ZOOM} onclick={() => glide(STEP ** (Math.floor(Math.log(zoom) / Math.log(STEP) + 0.01) + 1))}>
+		<button aria-label="Zoom in" disabled={zoom >= deepest} onclick={() => glide(STEP ** (Math.floor(Math.log(zoom) / Math.log(STEP) + 0.01) + 1))}>
 			<svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12" /></svg>
 		</button>
 	</div>
@@ -920,10 +986,16 @@
 
 	.zoom {
 		position: fixed;
-		right: 16px;
-		bottom: 16px;
+		right: calc(16px + env(safe-area-inset-right, 0px));
+		bottom: calc(16px + max(var(--bar, 0px), env(safe-area-inset-bottom, 0px)));
 		display: flex;
 		gap: 8px;
+	}
+
+	@media (max-height: 460px) and (orientation: landscape) {
+		.zoom {
+			right: calc(72px + env(safe-area-inset-right, 0px));
+		}
 	}
 
 	.zoom button {
@@ -937,6 +1009,7 @@
 		background: var(--island);
 		color: var(--text);
 		cursor: pointer;
+		touch-action: manipulation;
 	}
 
 	.zoom button:hover:not(:disabled) {
@@ -1056,15 +1129,6 @@
 		font: 13px 'Inter', sans-serif;
 		box-shadow: 0 16px 48px var(--shadow);
 		pointer-events: none;
-		transform: translate(var(--dx, 16px), var(--dy, 16px));
-	}
-
-	.card.flipped {
-		--dx: calc(-100% - 16px);
-	}
-
-	.card.above {
-		--dy: calc(-100% - 16px);
 	}
 
 	h2 {

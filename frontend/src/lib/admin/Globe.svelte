@@ -30,6 +30,8 @@
 	let hovered: number | null = $state(null);
 	let hovering = $state(false);
 	let pointer = $state({ x: 0, y: 0 });
+	let svg: SVGSVGElement | undefined = $state();
+	let tip = $state(0);
 	let drag: { x: number; y: number; lambda: number; phi: number; moved: boolean } | null = $state(null);
 	let moved = false;
 
@@ -45,12 +47,13 @@
 	const counts = $derived(new Map(rows.map((row) => [row.name, row.value])));
 	const total = $derived(rows.reduce((sum, row) => sum + row.value, 0));
 	const max = $derived(Math.max(0, ...rows.filter((row) => row.name !== 'unknown').map((row) => row.value)));
-	const radius = $derived(Math.max(0, Math.min(width, height) / 2 - 2));
+	const size = $derived(width ? Math.min(height, width) : height);
+	const radius = $derived(Math.max(0, size / 2 - 2));
 	const path = $derived(
 		geoPath(
 			geoOrthographic()
 				.scale(radius)
-				.translate([width / 2, height / 2])
+				.translate([width / 2, size / 2])
 				.rotate([rotation.lambda, rotation.phi])
 		)
 	);
@@ -64,26 +67,39 @@
 		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		let last = performance.now();
 		let frame = requestAnimationFrame(function spin(now) {
-			if (!paused && !hovering && !drag) rotation.lambda += (now - last) * 0.006;
+			if (!paused && !hovering && !drag && hovered === null) rotation.lambda += (now - last) * 0.006;
 			last = now;
 			frame = requestAnimationFrame(spin);
 		});
 		return () => cancelAnimationFrame(frame);
 	});
 
+	function locate(event: PointerEvent) {
+		const box = (event.currentTarget as Element).getBoundingClientRect();
+		pointer = { x: event.clientX - box.left, y: event.clientY - box.top };
+	}
+
 	function down(event: PointerEvent) {
 		event.currentTarget instanceof Element && event.currentTarget.setPointerCapture(event.pointerId);
 		drag = { x: event.clientX, y: event.clientY, ...rotation, moved: false };
+		if (event.pointerType === 'mouse') return;
+		locate(event);
+		const index = (event.target as Element).getAttribute('data-index');
+		hovered = index === null ? null : Number(index);
 	}
 
 	function move(event: PointerEvent) {
-		const box = (event.currentTarget as Element).getBoundingClientRect();
-		pointer = { x: event.clientX - box.left, y: event.clientY - box.top };
-		const index = (event.target as Element).getAttribute('data-index');
-		hovered = index === null ? null : Number(index);
+		locate(event);
+		if (event.pointerType === 'mouse') {
+			const index = (event.target as Element).getAttribute('data-index');
+			hovered = index === null ? null : Number(index);
+		}
 		if (!drag) return;
 		const [dx, dy] = [event.clientX - drag.x, event.clientY - drag.y];
-		if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+		if (Math.abs(dx) + Math.abs(dy) > 3) {
+			drag.moved = true;
+			hovered = null;
+		}
 		const speed = 60 / Math.max(radius, 1);
 		rotation = {
 			lambda: drag.lambda + dx * speed,
@@ -110,19 +126,27 @@
 
 	const active = $derived(hovered === null || drag ? null : shapes[hovered]);
 	const activeCount = $derived(active ? (counts.get(active.code) ?? 0) : 0);
+	const left = $derived.by(() => {
+		if (pointer.x + 12 + tip <= width) return pointer.x + 12;
+		if (pointer.x - 12 - tip >= 0) return pointer.x - 12 - tip;
+		return Math.max(0, Math.min(width - tip, pointer.x - tip / 2));
+	});
 </script>
 
-<span class="globe" bind:clientWidth={width} style:height="{height}px">
+<svelte:window onpointerdown={(event) => svg?.contains(event.target as Node) || (hovered = null)} />
+
+<span class="globe" bind:clientWidth={width} style:height="{size}px">
 	{#if width}
 		<svg
+			bind:this={svg}
 			{width}
-			{height}
+			height={size}
 			aria-hidden="true"
 			class:dragging={drag}
 			onpointerenter={() => (hovering = true)}
-			onpointerleave={() => {
+			onpointerleave={(event) => {
 				hovering = false;
-				hovered = null;
+				if (event.pointerType === 'mouse') hovered = null;
 			}}
 			onpointerdown={down}
 			onpointermove={move}
@@ -146,7 +170,13 @@
 			{/each}
 		</svg>
 		{#if active}
-			<span class="tooltip" class:flip={pointer.x > width / 2} style:left="{pointer.x}px" style:top="{pointer.y}px">
+			<span
+				class="tooltip"
+				bind:clientWidth={tip}
+				style:left="{left}px"
+				style:top="{pointer.y}px"
+				style:visibility={tip ? undefined : 'hidden'}
+			>
 				<span class="name">{active.code ? countryName(active.code) : active.name}</span>
 				<span class="row">
 					<strong>{activeCount.toLocaleString('en')}</strong>
@@ -169,7 +199,7 @@
 	svg {
 		display: block;
 		cursor: grab;
-		touch-action: none;
+		touch-action: pan-y;
 	}
 
 	svg.dragging {
@@ -204,7 +234,7 @@
 		flex-direction: column;
 		gap: 2px;
 		position: absolute;
-		transform: translate(12px, 12px);
+		transform: translateY(12px);
 		padding: 8px 10px;
 		border: 1px solid var(--tip-border);
 		border-radius: 8px;
@@ -215,8 +245,10 @@
 		z-index: 1;
 	}
 
-	.tooltip.flip {
-		transform: translate(calc(-100% - 12px), 12px);
+	@media (hover: none) {
+		.tooltip {
+			transform: translateY(calc(-100% - 24px));
+		}
 	}
 
 	.name,

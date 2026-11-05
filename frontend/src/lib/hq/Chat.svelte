@@ -197,9 +197,18 @@
 		margin: 0 -8px;
 		padding: 12px 0;
 		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 
 	.error {
 		color: var(--text-muted);
+	}
+
+	@media (pointer: coarse), (orientation: portrait) and (max-width: 600px) {
+		.chat {
+			flex: 1;
+			height: auto;
+			min-height: 0;
+		}
 	}
 </style>

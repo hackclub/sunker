@@ -3,15 +3,19 @@
 	import { RESOURCES } from '#lib/resources.js';
 	import { image } from '#lib/styles.svelte.js';
 
+	let open = $state(false);
+
 	const amount = (key: string) => (me.current?.resources?.[key] ?? 0).toLocaleString();
 </script>
 
-<section class="resources" aria-label="Resources">
-	<div class="row">
+<svelte:window onpointerdown={(event) => open && !(event.target instanceof Element && event.target.closest('.resources')) && (open = false)} />
+
+<section class="resources" class:open aria-label="Resources">
+	<button type="button" class="row" aria-expanded={open} onclick={() => (open = !open)}>
 		{#each RESOURCES as resource (resource.key)}
 			<span class="count" title={resource.name}><img src={image(resource.icon)} alt={resource.name} />{amount(resource.key)}</span>
 		{/each}
-	</div>
+	</button>
 	<div class="details">
 		<ul>
 			{#each RESOURCES as resource (resource.key)}
@@ -44,6 +48,13 @@
 		display: flex;
 		gap: 14px;
 		padding: 8px 14px 8px 10px;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
+		text-align: inherit;
+		cursor: pointer;
+		touch-action: manipulation;
 	}
 
 	.count {
@@ -68,11 +79,11 @@
 		transition: grid-template-rows 0.25s ease;
 	}
 
-	.resources:hover {
+	.resources.open {
 		z-index: 22;
 	}
 
-	.resources:hover .details {
+	.resources.open .details {
 		grid-template-rows: 1fr;
 	}
 
@@ -81,6 +92,7 @@
 		flex-direction: column;
 		gap: 10px;
 		min-height: 0;
+		max-height: calc(100dvh - 112px);
 		margin: 0;
 		padding: 0 14px 0 10px;
 		overflow: hidden;
@@ -88,10 +100,30 @@
 		transition: padding 0.25s ease;
 	}
 
-	.resources:hover ul {
+	.resources.open ul {
 		padding-top: 12px;
 		padding-bottom: 12px;
 		border-top: 1px solid var(--island-border);
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	@media (hover: hover) {
+		.resources:hover {
+			z-index: 22;
+		}
+
+		.resources:hover .details {
+			grid-template-rows: 1fr;
+		}
+
+		.resources:hover ul {
+			padding-top: 12px;
+			padding-bottom: 12px;
+			border-top: 1px solid var(--island-border);
+			overflow-y: auto;
+			overscroll-behavior: contain;
+		}
 	}
 
 	li {
@@ -108,6 +140,38 @@
 		margin: 2px 0 0;
 		color: var(--text-muted);
 		line-height: 1.35;
+	}
+
+	@media (max-width: 639px) {
+		.resources {
+			top: calc(env(safe-area-inset-top, 0px) + 12px);
+			left: 72px;
+		}
+
+		.row {
+			display: grid;
+			width: 100%;
+			grid-template-columns: repeat(5, 1fr);
+			gap: 4px;
+			padding: 6px 4px;
+		}
+
+		.count {
+			flex-direction: column;
+			gap: 2px;
+			line-height: 16px;
+			white-space: nowrap;
+		}
+
+		ul {
+			max-height: calc(100dvh - 168px);
+		}
+	}
+
+	@media (max-width: 639px) and (orientation: portrait) {
+		ul {
+			max-height: calc(100dvh - 240px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {

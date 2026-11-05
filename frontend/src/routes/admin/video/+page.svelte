@@ -300,6 +300,7 @@
 
 	header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 12px;
 	}
@@ -374,6 +375,7 @@
 		gap: 20px;
 		min-width: 0;
 		overflow: auto;
+		container-type: inline-size;
 	}
 
 	.top {
@@ -393,7 +395,7 @@
 
 	.player.tall {
 		justify-self: center;
-		width: min(100%, 340px);
+		width: min(100%, 340px, 60dvh);
 		aspect-ratio: 9 / 16;
 	}
 
@@ -595,5 +597,47 @@
 
 	.button.danger {
 		color: var(--negative);
+	}
+
+	@container (max-width: 640px) {
+		.top {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+
+	@media (max-width: 900px), (max-height: 480px) {
+		.verification {
+			height: auto;
+		}
+
+		.split {
+			grid-template-columns: minmax(0, 1fr);
+			flex: none;
+		}
+
+		.queue {
+			flex-direction: row;
+			scroll-snap-type: x proximity;
+		}
+
+		.queue li {
+			flex: 0 0 240px;
+			min-width: 0;
+			scroll-snap-align: start;
+		}
+
+		article {
+			overflow: visible;
+		}
+	}
+
+	@media (pointer: coarse) {
+		.button {
+			min-height: 44px;
+		}
+
+		summary {
+			padding: 14px 12px;
+		}
 	}
 </style>

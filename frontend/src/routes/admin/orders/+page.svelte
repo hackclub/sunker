@@ -81,24 +81,24 @@
 				<tbody>
 					{#each orders as order (order.id)}
 						<tr>
-							<td>{order.id}</td>
-							<td>
+							<td data-label="#">{order.id}</td>
+							<td data-label="Prize">
 								<span>{order.prize} <span class="muted">ring {order.prize_ring}</span></span>
 							</td>
-							<td>
+							<td data-label="User">
 								{#if users}
 									<a href="/admin/users?user={order.user_id}">{order.user_name ?? `User #${order.user_id}`}</a>
 								{:else}
 									{order.user_name ?? `User #${order.user_id}`}
 								{/if}
 							</td>
-							<td>{new Date(order.created_at).toLocaleDateString()}</td>
-							<td>
+							<td data-label="Ordered">{new Date(order.created_at).toLocaleDateString()}</td>
+							<td data-label="Status">
 								<select bind:value={edits[order.id].status} aria-label="Status of order #{order.id}">
 									{#each ORDER_STATUSES as status (status)}<option value={status}>{status}</option>{/each}
 								</select>
 							</td>
-							<td><input type="text" bind:value={edits[order.id].tracking} aria-label="Tracking number of order #{order.id}" /></td>
+							<td data-label="Tracking number"><input type="text" bind:value={edits[order.id].tracking} aria-label="Tracking number of order #{order.id}" /></td>
 							<td>
 								<button class="button primary" disabled={!changed(order) || saving === order.id} onclick={() => save(order)}>{saving === order.id ? 'Saving...' : 'Save'}</button>
 								{#if errors[order.id]}<p class="error">{errors[order.id]}</p>{/if}
@@ -120,6 +120,7 @@
 
 	header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 12px;
 	}
@@ -201,5 +202,77 @@
 		border-color: var(--accent);
 		background: var(--accent);
 		color: var(--background);
+	}
+
+	@media (max-width: 740px) {
+		.scroll {
+			overflow: visible;
+			border: none;
+		}
+
+		table,
+		tbody {
+			display: block;
+		}
+
+		thead {
+			display: none;
+		}
+
+		tr {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 10px 12px;
+			margin-bottom: 8px;
+			padding: 12px;
+			border: 1px solid var(--island-border);
+			border-radius: 12px;
+			background: var(--island);
+		}
+
+		td {
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			grid-column: 1 / -1;
+			padding: 0;
+			border: none;
+			white-space: normal;
+		}
+
+		td::before {
+			content: attr(data-label);
+			color: var(--text-muted);
+			font-size: 11px;
+		}
+
+		td:nth-child(1) {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		td:nth-child(4) {
+			grid-column: 2;
+			grid-row: 1;
+		}
+
+		td:nth-child(7)::before {
+			display: none;
+		}
+	}
+
+	@media (pointer: coarse) {
+		input,
+		select,
+		.button {
+			min-height: 44px;
+		}
+	}
+
+	@media (max-width: 740px) and (pointer: coarse) {
+		td a {
+			margin: -12px 0;
+			padding: 15px 0;
+		}
 	}
 </style>

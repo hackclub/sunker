@@ -177,6 +177,7 @@
 
 <style>
 	.project {
+		container-type: inline-size;
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
@@ -332,5 +333,31 @@
 	footer {
 		display: flex;
 		justify-content: space-between;
+	}
+
+	@container (max-width: 360px) {
+		.top {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.shot {
+			min-height: 160px;
+		}
+	}
+
+	@media (pointer: coarse) {
+		.hackatime {
+			max-height: 264px;
+		}
+
+		.hackatime label {
+			box-sizing: border-box;
+			min-height: 44px;
+		}
+
+		.hackatime input {
+			width: 20px;
+			height: 20px;
+		}
 	}
 </style>

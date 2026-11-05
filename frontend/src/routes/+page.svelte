@@ -44,6 +44,13 @@
 	}
 
 	a {
+		position: relative;
 		color: var(--accent);
+	}
+
+	a::after {
+		content: '';
+		position: absolute;
+		inset: -14px -20px;
 	}
 </style>

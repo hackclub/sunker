@@ -16,7 +16,7 @@
 	{#each ENEMIES as enemy (enemy)}
 		<label title={enemyName(enemy)}>
 			<img src={image(enemy)} alt="" />
-			<input type="number" min="0" value={force[enemy] ?? 0} {disabled} oninput={(event) => set(enemy, Number(event.currentTarget.value))} />
+			<input type="number" inputmode="numeric" min="0" value={force[enemy] ?? 0} {disabled} oninput={(event) => set(enemy, Number(event.currentTarget.value))} />
 			<span>{enemyName(enemy)}{#if available}<em> / {available[enemy] ?? 0}</em>{/if}</span>
 		</label>
 	{/each}
@@ -25,7 +25,7 @@
 <style>
 	.force {
 		display: grid;
-		grid-template-columns: repeat(3, 1fr);
+		grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
 		gap: 6px;
 	}
 
@@ -50,6 +50,7 @@
 	input {
 		width: 100%;
 		min-width: 0;
+		box-sizing: border-box;
 		padding: 2px 4px;
 		border: 1px solid var(--island-border);
 		border-radius: 4px;
@@ -67,5 +68,12 @@
 	em {
 		font-style: normal;
 		opacity: 0.8;
+	}
+
+	@media (pointer: coarse) {
+		input {
+			min-height: 44px;
+			padding: 6px 6px;
+		}
 	}
 </style>

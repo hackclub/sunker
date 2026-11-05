@@ -266,4 +266,20 @@
 	.error {
 		color: var(--negative);
 	}
+
+	select {
+		max-width: 100%;
+	}
+
+	@media (pointer: coarse) {
+		input,
+		select,
+		button {
+			min-height: 44px;
+		}
+
+		a {
+			padding: 15px 0;
+		}
+	}
 </style>

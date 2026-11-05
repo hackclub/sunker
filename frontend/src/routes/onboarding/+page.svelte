@@ -156,7 +156,7 @@
 	{/if}
 
 	{#if index > 0 && !leaving}
-		<button class="back" onclick={back}>
+		<button class="back" class:editing onclick={back}>
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
 			Back
 		</button>
@@ -166,6 +166,10 @@
 </div>
 
 <style>
+	:global(html:has(.onboarding)) {
+		overscroll-behavior: none;
+	}
+
 	.onboarding {
 		position: fixed;
 		inset: 0;
@@ -176,6 +180,7 @@
 		font: 13px 'Inter', sans-serif;
 		user-select: none;
 		cursor: pointer;
+		touch-action: manipulation;
 	}
 
 	.scene {
@@ -223,6 +228,7 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 12px;
+		overflow-x: hidden;
 		overflow-y: auto;
 		padding: 40px 16px 88px;
 		cursor: default;
@@ -260,6 +266,13 @@
 		cursor: default;
 	}
 
+	@media (pointer: coarse) {
+		.continue,
+		.back {
+			min-height: 44px;
+		}
+	}
+
 	.subtitle {
 		margin: 0;
 		padding: 6px 12px;
@@ -290,8 +303,10 @@
 		cursor: pointer;
 	}
 
-	.back:hover {
-		background: var(--hover);
+	@media (hover: hover) {
+		.back:hover {
+			background: var(--hover);
+		}
 	}
 
 	.back svg {
@@ -302,6 +317,12 @@
 		stroke-width: 2.5;
 		stroke-linecap: round;
 		stroke-linejoin: round;
+	}
+
+	@media (max-width: 640px) {
+		.back.editing {
+			display: none;
+		}
 	}
 
 	.fade {

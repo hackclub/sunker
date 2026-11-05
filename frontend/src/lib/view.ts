@@ -15,8 +15,25 @@ export const FLIGHT = 1800;
 const TABLE = 0.24;
 const FLATTEN = 0.5;
 const RISE = 0.012;
+export const BAR = 64;
+export const PHONE = 600;
+const ROW = 76;
+const SIDE = 0.64;
+const SHARE = 400;
+const GUIDE = 0.62;
+const ART = { left: 70, top: 44, right: 74 };
 
 export type Plane = { width: number; height: number; scale: number; x: number; y: number };
+export type Pose = { x: number; y: number; sx: number; sy: number };
+export type Rect = { x: number; y: number; width: number; height: number };
+export type Stage = {
+	pose: Pose;
+	wall: number;
+	box: Rect | null;
+	unit: number;
+	crowd: { left: number; right: number; top: number; bottom: number; person: number; depth: number; pad: number } | null;
+	guide: { size: number; top: number } | null;
+};
 type Point = [number, number];
 
 export function frame(tiles: PlacedTile[], width: number, height: number): Plane {
@@ -40,7 +57,7 @@ export function aim(plane: Plane, zoom: number, [x, y]: Point): Plane {
 	return { ...plane, scale, x: plane.width / 2 - x * scale, y: plane.height / 2 - y * scale };
 }
 
-function limits(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number) {
+function limits(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number, rest = 0) {
 	const unproject = unprojector(plane, width, height);
 	const [cx, cy] = middle(plane);
 	const corners = [unproject(0, 0), unproject(width, 0), unproject(0, height), unproject(width, height)];
@@ -51,17 +68,19 @@ function limits(plane: Plane, tiles: PlacedTile[], width: number, height: number
 	const [sideways, upward, downward] = [span, up, down].map((reach) => reach * PAN);
 	const [left, right] = [Math.max(box.left - EDGE + span - sideways, cx - slack * span - sideways), Math.min(box.left + box.width + EDGE - span + sideways, cx + slack * span + sideways)];
 	const [top, bottom] = [Math.max(box.top - EDGE + up - upward, cy - slack * up - upward), Math.min(box.top + box.height + EDGE - down + downward, cy + slack * down + downward)];
-	return { xs: left > right ? [cx] : [left, right], ys: top > bottom ? [cy] : [top, bottom], span, up, down };
+	const drop = rest ? (cy - unproject(width / 2, rest)[1]) / zoom : 0;
+	return { xs: left > right ? [cx] : [left, right], ys: top > bottom ? [cy + Math.min(0, drop), cy + Math.max(0, drop)] : [top + Math.min(0, drop), bottom + Math.max(0, drop)], span, up, down, drop };
 }
 
-export function confine(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number, point: Point): Point {
-	const { xs, ys, span, up, down } = limits(plane, tiles, width, height, zoom);
+export function confine(plane: Plane, tiles: PlacedTile[], width: number, height: number, zoom: number, point: Point, rest = 0): Point {
+	const { xs, ys, span, up, down, drop } = limits(plane, tiles, width, height, zoom, rest);
 	const fence = ([x, y]: Point): Point => [Math.max(xs[0], Math.min(xs.at(-1)!, x)), Math.max(ys[0], Math.min(ys.at(-1)!, y))];
 	const [x, y] = fence(point);
-	const near = tiles.reduce((best, t) => (Math.hypot(t.x - x, t.y - y) < Math.hypot(best.x - x, best.y - y) ? t : best));
+	const seen = y - drop;
+	const near = tiles.reduce((best, t) => (Math.hypot(t.x - x, t.y - seen) < Math.hypot(best.x - x, best.y - seen) ? t : best));
 	const reach = Math.min(span, up, down) / 2;
-	const distance = Math.hypot(x - near.x, y - near.y);
-	return distance <= reach ? [x, y] : fence([near.x + ((x - near.x) * reach) / distance, near.y + ((y - near.y) * reach) / distance]);
+	const distance = Math.hypot(x - near.x, seen - near.y);
+	return distance <= reach ? [x, y] : fence([near.x + ((x - near.x) * reach) / distance, near.y + ((seen - near.y) * reach) / distance + drop]);
 }
 
 export function unprojector(plane: Plane, width: number, height: number) {
@@ -102,31 +121,67 @@ export function projector(plane: Plane, width: number, height: number) {
 	};
 }
 
-function placement(tiles: PlacedTile[], width: number, height: number) {
-	return { scale: (TABLE * width) / (bounds(tiles).width * frame(tiles, width, height).scale), rise: RISE * width };
+function flat(tiles: PlacedTile[], width: number, height: number): Pose {
+	const scale = (TABLE * width) / (bounds(tiles).width * frame(tiles, width, height).scale);
+	return { x: 0, y: -RISE * width, sx: scale, sy: scale * FLATTEN };
 }
 
-export function table(tiles: PlacedTile[], width: number, height: number) {
-	const { scale, rise } = placement(tiles, width, height);
-	return `translateY(${-rise}px) scale(${scale}, ${scale * FLATTEN})`;
+function level(tiles: PlacedTile[], width: number, height: number, area: Rect): Pose {
+	const points = island(tiles, width, height).flat();
+	const [xs, ys] = [points.map(([x]) => x), points.map(([, y]) => y)];
+	const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+	const scale = Math.min(area.width / (right - left), area.height / ((bottom - top) * FLATTEN));
+	const [dx, dy] = [(left + right) / 2 - width / 2, (top + bottom) / 2 - height / 2];
+	return { x: area.x + area.width / 2 - width / 2 - scale * dx, y: area.y + area.height / 2 - height / 2 - scale * FLATTEN * dy, sx: scale, sy: scale * FLATTEN };
 }
 
-function seat(tiles: PlacedTile[], width: number, height: number) {
-	const { scale, rise } = placement(tiles, width, height);
-	return ([x, y]: Point): Point => [width / 2 + (x - width / 2) * scale, height / 2 + (y - height / 2) * scale * FLATTEN - rise];
+export function stage(tiles: PlacedTile[], width: number, height: number, top: number, bottom: number, hud: number, portrait: boolean): Stage {
+	if (!portrait) return { pose: flat(tiles, width, height), wall: height / 3, box: null, unit: 0, crowd: null, guide: null };
+	const length = Math.round(width * SIDE);
+	const unit = length / SHARE;
+	const person = Math.max(44, Math.min(length * 0.2, 76));
+	const depth = person * 0.45;
+	const clear = top + 12 + hud;
+	const floor = height - bottom - (width <= PHONE ? BAR : 0) - ROW - 8;
+	const long = Math.max(Math.min(floor - (clear + person * 1.74 + depth + 4), length * 1.8), length * 0.6);
+	const left = Math.round((width - length) / 2);
+	const table = { x: left, y: floor - long, width: length, height: long };
+	const wall = Math.round(table.y - 12);
+	const size = Math.round(Math.max(72, Math.min(width * 0.22, 120)));
+	const area = { x: left + 35 * unit, y: table.y + 22 * unit, width: length - 70 * unit, height: long - 100 * unit };
+	return {
+		pose: level(tiles, width, height, area),
+		wall,
+		box: { x: left - ART.left * unit, y: table.y - ART.top * unit, width: length + (ART.left + ART.right) * unit, height: long + ART.top * unit },
+		unit,
+		crowd: { left, right: left + length, top: table.y, bottom: table.y + long, person, depth, pad: width <= PHONE ? 2 : BAR + 4 },
+		guide: { size, top: wall - Math.round(size * GUIDE) }
+	};
 }
 
-export function halo(outline: Point[][], tiles: PlacedTile[], width: number, height: number, keep: (tile: PlacedTile) => boolean = () => true) {
-	const point = seat(tiles, width, height);
+export const transform = (pose: Pose) => `translate(${pose.x}px, ${pose.y}px) scale(${pose.sx}, ${pose.sy})`;
+
+export function seat(pose: Pose, width: number, height: number) {
+	return ([x, y]: Point): Point => [width / 2 + pose.x + (x - width / 2) * pose.sx, height / 2 + pose.y + (y - height / 2) * pose.sy];
+}
+
+export function unseat(pose: Pose, width: number, height: number) {
+	return ([x, y]: Point): Point => [width / 2 + (x - width / 2 - pose.x) / pose.sx, height / 2 + (y - height / 2 - pose.y) / pose.sy];
+}
+
+export function halo(outline: Point[][], tiles: PlacedTile[], pose: Pose, width: number, height: number, keep: (tile: PlacedTile) => boolean = () => true) {
+	const point = seat(pose, width, height);
 	return outline
 		.filter((_, i) => keep(tiles[i]))
 		.map((polygon) => 'M' + polygon.map((p) => point(p).join(' ')).join('L') + 'Z')
 		.join('');
 }
 
-export function crest(outline: Point[][], tiles: PlacedTile[], width: number, height: number) {
-	const point = seat(tiles, width, height);
-	return Math.min(...outline.flatMap((polygon) => polygon.map((p) => point(p)[1])));
+export function crest(outline: Point[][], pose: Pose, width: number, height: number): Point {
+	const point = seat(pose, width, height);
+	const points = outline.flatMap((polygon) => polygon.map(point));
+	const xs = points.map(([x]) => x);
+	return [(Math.min(...xs) + Math.max(...xs)) / 2, Math.min(...points.map(([, y]) => y))];
 }
 
 export function island(tiles: PlacedTile[], width: number, height: number) {
@@ -157,7 +212,7 @@ export function inside(polygons: Point[][], [px, py]: Point) {
 	);
 }
 
-export function reveal(tiles: PlacedTile[], width: number, height: number) {
+export function reveal(tiles: PlacedTile[], width: number, height: number, pose: Pose) {
 	if (!width || !height) return { grow: [], spread: [] };
 	const plane = frame(tiles, width, height);
 	const project = projector(plane, width, height);
@@ -219,7 +274,7 @@ export function reveal(tiles: PlacedTile[], width: number, height: number) {
 	}
 	spread.push({ '--clip': 'inset(0)', offset: 1 });
 	const grow: Keyframe[] = [
-		{ transform: table(tiles, width, height), offset: 0, easing: 'cubic-bezier(0.6, 0, 0.3, 1)' },
+		{ transform: transform(pose), offset: 0, easing: 'cubic-bezier(0.6, 0, 0.3, 1)' },
 		{ transform: 'none', offset: 0.5 },
 		{ transform: 'none', offset: 1 }
 	];

@@ -42,8 +42,13 @@
 	let canvas: HTMLCanvasElement;
 	let hover = $state<PlacedTile | null>(null);
 	let pointer = $state({ x: 0, y: 0 });
+	let touched = $state(false);
+	let tipWidth = $state(0);
+	let tipHeight = $state(0);
 	let loaded = $state(0);
-	let press: { x: number; y: number; view: { x: number; y: number; scale: number }; moved: boolean } | null = null;
+	let press: { x: number; y: number; view: { x: number; y: number; scale: number }; moved: boolean; slop: number } | null = null;
+	const points = new Map<number, { x: number; y: number }>();
+	let pinch: { distance: number; scale: number; at: number[] } | null = null;
 
 	const images = $derived(
 		Object.fromEntries(
@@ -60,10 +65,12 @@
 	const box = $derived(bounds(tiles));
 	const occupied = (row: number, col: number) => total(enemies.get(key(row, col))) > 0;
 
+	const fitted = () => Math.min(width / box.width, height / box.height) * 0.94;
+	const zoom = (scale: number) => Math.min(120, Math.max(width && height && tiles.length ? Math.min(4, fitted()) : 4, scale));
+
 	export function fit() {
 		if (!width || !height || !tiles.length) return;
-		const scale = Math.min(width / box.width, height / box.height) * 0.94;
-		view = { x: box.left + box.width / 2, y: box.top + box.height / 2, scale };
+		view = { x: box.left + box.width / 2, y: box.top + box.height / 2, scale: fitted() };
 	}
 
 	$effect(() => {
@@ -290,28 +297,68 @@
 		outline(selected ? placed.get(selected) : null, PALETTE.accent, 3);
 	});
 
+	function middle() {
+		const [a, b] = [...points.values()];
+		const rect = canvas.getBoundingClientRect();
+		return { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top, distance: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+	}
+
 	function down(event: PointerEvent) {
 		if (!view) return;
 		canvas.setPointerCapture(event.pointerId);
-		press = { x: event.clientX, y: event.clientY, view: { ...view }, moved: false };
+		points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+		if (event.pointerType === 'touch') hover = null;
+		if (points.size === 2) {
+			const { x, y, distance } = middle();
+			pinch = { distance, scale: view.scale, at: world(x, y) };
+			press = null;
+			hover = null;
+		} else if (points.size === 1) {
+			press = { x: event.clientX, y: event.clientY, view: { ...view }, moved: false, slop: event.pointerType === 'mouse' ? 4 : 10 };
+		}
 	}
 
 	function move(event: PointerEvent) {
 		const rect = canvas.getBoundingClientRect();
 		pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+		if (points.has(event.pointerId)) points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+		if (pinch && points.size === 2) {
+			const { x, y, distance } = middle();
+			const scale = zoom((pinch.scale * distance) / pinch.distance);
+			view = { scale, x: pinch.at[0] - (x - width / 2) / scale, y: pinch.at[1] - (y - height / 2) / scale };
+			return;
+		}
 		if (press) {
 			const dx = event.clientX - press.x;
 			const dy = event.clientY - press.y;
-			if (Math.hypot(dx, dy) > 4) press.moved = true;
+			if (Math.hypot(dx, dy) > press.slop) press.moved = true;
 			if (press.moved) view = { ...press.view, x: press.view.x - dx / press.view.scale, y: press.view.y - dy / press.view.scale };
 		}
-		hover = press?.moved ? null : pick(pointer.x, pointer.y);
+		hover = press?.moved || event.pointerType === 'touch' ? null : pick(pointer.x, pointer.y);
+	}
+
+	function cancel(event: PointerEvent) {
+		points.delete(event.pointerId);
+		pinch = null;
+		press = null;
 	}
 
 	function up(event: PointerEvent) {
+		points.delete(event.pointerId);
+		if (pinch) {
+			pinch = null;
+			const [rest] = [...points.values()];
+			press = rest && view ? { x: rest.x, y: rest.y, view: { ...view }, moved: true, slop: 10 } : null;
+			return;
+		}
 		if (press && !press.moved) {
 			const rect = canvas.getBoundingClientRect();
 			const tile = pick(event.clientX - rect.left, event.clientY - rect.top);
+			touched = event.pointerType === 'touch';
+			if (touched) {
+				pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+				hover = tile;
+			}
 			if (tile) onpick?.(tile.row, tile.col);
 		}
 		press = null;
@@ -323,9 +370,16 @@
 		const rect = canvas.getBoundingClientRect();
 		const [px, py] = [event.clientX - rect.left, event.clientY - rect.top];
 		const [wx, wy] = world(px, py);
-		const scale = Math.min(120, Math.max(4, view.scale * Math.exp(-event.deltaY * 0.0015)));
+		const scale = zoom(view.scale * Math.exp(-event.deltaY * 0.0015));
 		view = { scale, x: wx - (px - width / 2) / scale, y: wy - (py - height / 2) / scale };
 	}
+
+	const tipAt = $derived.by(() => {
+		const above = pointer.y - tipHeight - 28;
+		const left = touched ? pointer.x - tipWidth / 2 : pointer.x + 14;
+		const top = touched ? (above >= 4 ? above : pointer.y + 28) : pointer.y + 14;
+		return { left: Math.max(4, Math.min(width - tipWidth - 4, left)), top: Math.max(4, Math.min(height - tipHeight - 4, top)) };
+	});
 
 	const tip = $derived.by(() => {
 		if (!hover) return null;
@@ -349,12 +403,13 @@
 		onpointerdown={down}
 		onpointermove={move}
 		onpointerup={up}
-		onpointerleave={() => (hover = null)}
+		onpointercancel={cancel}
+		onpointerleave={(event) => event.pointerType !== 'touch' && (hover = null)}
 		onwheel={wheel}
 	></canvas>
 	<button class="fit" onclick={fit}>Fit</button>
 	{#if tip}
-		<div class="tip" style:left="{pointer.x + 14}px" style:top="{pointer.y + 14}px">
+		<div class="tip" bind:clientWidth={tipWidth} bind:clientHeight={tipHeight} style:left="{tipAt.left}px" style:top="{tipAt.top}px">
 			<strong>{tip.place}</strong>
 			{#if tip.coords}<span class="muted">{tip.coords}</span>{/if}
 			{#if tip.enemies}<span class="hostile">{tip.enemies}</span>{/if}
@@ -416,5 +471,18 @@
 
 	.hostile {
 		color: var(--negative);
+	}
+
+	@media (pointer: coarse) {
+		canvas {
+			-webkit-tap-highlight-color: transparent;
+			-webkit-touch-callout: none;
+			user-select: none;
+		}
+
+		.fit {
+			min-width: 44px;
+			min-height: 44px;
+		}
 	}
 </style>

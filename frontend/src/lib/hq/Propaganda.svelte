@@ -153,7 +153,7 @@
 		position: relative;
 	}
 
-	.box .input {
+	.box input.input {
 		padding-right: 40px;
 	}
 
@@ -261,5 +261,29 @@
 	.error {
 		color: var(--negative);
 		font-size: 12px;
+	}
+
+	@media (pointer: coarse) {
+		.box input.input {
+			min-height: 44px;
+			padding-right: 52px;
+		}
+
+		.box button {
+			right: 2px;
+			width: 40px;
+			height: 40px;
+		}
+
+		.videos li {
+			align-items: center;
+			min-height: 44px;
+			padding-block: 0;
+		}
+
+		.videos a {
+			flex: 1;
+			padding-block: 14px;
+		}
 	}
 </style>

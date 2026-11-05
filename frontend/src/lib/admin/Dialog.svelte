@@ -39,6 +39,8 @@
 	dialog {
 		width: min(var(--width, 960px), calc(100vw - 32px));
 		max-height: calc(100vh - 32px);
+		max-height: calc(100dvh - 32px);
+		overscroll-behavior: contain;
 		padding: 0;
 		border: 1px solid var(--island-border);
 		border-radius: 12px;
@@ -80,6 +82,7 @@
 
 	.close {
 		display: grid;
+		flex-shrink: 0;
 		place-items: center;
 		width: 28px;
 		height: 28px;
@@ -97,5 +100,30 @@
 		stroke: var(--text-muted);
 		stroke-width: 1.5;
 		stroke-linecap: round;
+	}
+
+	@media (pointer: coarse) {
+		.close {
+			width: 44px;
+			height: 44px;
+			margin: -8px -8px -8px 0;
+		}
+	}
+
+	@media (max-width: 560px), (max-height: 500px) {
+		.body {
+			gap: 16px;
+			padding: 0 16px 16px;
+		}
+
+		header {
+			position: sticky;
+			top: 0;
+			z-index: 1;
+			margin: 0 -16px;
+			padding: 14px 16px 10px;
+			border-bottom: 1px solid var(--island-border);
+			background: var(--island);
+		}
 	}
 </style>

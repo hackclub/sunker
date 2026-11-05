@@ -62,6 +62,7 @@
 		{placeholder}
 		rows="1"
 		maxlength="2000"
+		enterkeyhint="send"
 		onkeydown={(event) => {
 			if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
 				event.preventDefault();
@@ -156,6 +157,34 @@
 	.wait {
 		font-size: 12px;
 		font-variant-numeric: tabular-nums;
+	}
+
+	@media (pointer: coarse) {
+		form {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: end;
+		}
+
+		.replying,
+		hr {
+			grid-column: 1 / -1;
+		}
+
+		.replying button {
+			margin: -8px 0;
+		}
+
+		textarea {
+			box-sizing: border-box;
+			min-height: 44px;
+			padding: 12px 4px 12px 12px;
+		}
+
+		button {
+			width: 44px;
+			height: 44px;
+		}
 	}
 
 	svg {

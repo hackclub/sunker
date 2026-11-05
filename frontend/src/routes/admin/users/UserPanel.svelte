@@ -532,6 +532,14 @@
 		overflow: hidden;
 	}
 
+	@media (max-width: 900px), (max-height: 480px) {
+		aside {
+			position: absolute;
+			inset: 0;
+			z-index: 1;
+		}
+	}
+
 	header {
 		display: flex;
 		justify-content: space-between;
@@ -798,5 +806,70 @@
 
 	textarea {
 		resize: vertical;
+	}
+
+	@media (max-width: 900px), (max-height: 480px) {
+		nav {
+			flex-wrap: nowrap;
+			overflow-x: auto;
+			scrollbar-width: none;
+		}
+
+		nav::-webkit-scrollbar {
+			display: none;
+		}
+
+		nav button {
+			flex-shrink: 0;
+			white-space: nowrap;
+		}
+
+		.row select {
+			flex: 1;
+			min-width: 0;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.fields.grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 360px) {
+		dl {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0;
+		}
+
+		dd {
+			margin-bottom: 8px;
+		}
+	}
+
+	@media (pointer: coarse) {
+		button {
+			min-height: 44px;
+		}
+
+		nav button {
+			min-height: 40px;
+		}
+
+		.close {
+			width: 44px;
+			height: 44px;
+			margin: -8px -8px -8px 0;
+		}
+
+		.link,
+		.masked {
+			min-height: 0;
+			padding: 10px 0;
+		}
+
+		.checks label {
+			min-height: 44px;
+		}
 	}
 </style>

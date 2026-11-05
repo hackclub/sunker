@@ -4,6 +4,7 @@
 	const DROP = WIDTH / Math.sqrt(3);
 	const RADIUS = 6;
 	export const DIALOG_WIDTH = 480;
+	export const SPLIT = 1200;
 
 	const span = (count: number) => count * WIDTH + (count - 1) * GAP + 2 * (DROP + GAP);
 	export const offset = (count: number, index: number) => DROP + GAP + index * (WIDTH + GAP) - span(count) / 2;
@@ -12,7 +13,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	let { side, open = false, count, dialog }: { side: 'left' | 'right'; open?: boolean; count: number; dialog?: Snippet } = $props();
+	let { side, open = false, peek = false, count, dialog }: { side: 'left' | 'right'; open?: boolean; peek?: boolean; count: number; dialog?: Snippet } = $props();
 
 	const height = $derived(span(count));
 
@@ -33,7 +34,7 @@
 	});
 </script>
 
-<aside class="dialog {side}" class:open style:--dialog-width="{DIALOG_WIDTH}px" inert={!open}>
+<aside class="dialog {side}" class:open class:peek style:--dialog-width="{DIALOG_WIDTH}px" inert={!open}>
 	{@render dialog?.()}
 </aside>
 
@@ -42,7 +43,7 @@
 	class:open
 	style:--width="{WIDTH}px"
 	style:--dialog-width="{DIALOG_WIDTH}px"
-	style:height="{height}px"
+	style:--height="{height}px"
 >
 	<svg width={WIDTH} {height}>
 		<path class="fill" d="{outline} Z" />
@@ -57,11 +58,12 @@
 		top: 50%;
 		z-index: 20;
 		width: var(--width);
+		height: var(--height);
 		transition: transform 0.25s ease;
 	}
 
 	.panel.open {
-		--shift: calc(var(--dialog-width) + 8px);
+		--shift: calc(min(var(--dialog-width), 100vw - 144px) + 8px);
 	}
 
 	.panel.left {
@@ -96,12 +98,13 @@
 
 	.dialog {
 		position: fixed;
-		top: 8px;
-		bottom: 8px;
+		top: calc(8px + var(--vv-top, 0px));
+		bottom: calc(8px + var(--vv-bottom, 0px));
 		z-index: 20;
 		box-sizing: border-box;
 		width: var(--dialog-width);
 		overflow: auto;
+		overscroll-behavior: contain;
 		border: 2px solid var(--background);
 		border-radius: 6px;
 		background: var(--island);
@@ -122,5 +125,69 @@
 
 	.dialog.open {
 		transform: none;
+	}
+
+	@media (pointer: coarse), (orientation: portrait) and (max-width: 600px) {
+		.dialog {
+			display: flex;
+			flex-direction: column;
+		}
+	}
+
+	.dialog {
+		width: min(var(--dialog-width), 100vw - 144px);
+	}
+
+	@media (orientation: portrait) and (max-width: 600px) {
+		.panel {
+			top: auto;
+			bottom: 0;
+			width: 50%;
+			height: var(--bar, 0px);
+			filter: drop-shadow(2px 0 var(--background)) drop-shadow(-2px 0 var(--background)) drop-shadow(0 2px var(--background))
+				drop-shadow(0 -2px var(--background));
+		}
+
+		.panel.left,
+		.panel.right {
+			transform: none;
+		}
+
+		.panel svg {
+			display: none;
+		}
+
+		.panel::before {
+			content: '';
+			position: absolute;
+			inset: 0;
+			background: var(--island);
+		}
+
+		.panel.left::before {
+			clip-path: polygon(0 0, calc(100% - 17px) 0, 100% 10px, 100% 100%, 0 100%);
+		}
+
+		.panel.right::before {
+			clip-path: polygon(0 10px, 17px 0, 100% 0, 100% 100%, 0 100%);
+		}
+
+		.dialog {
+			top: calc(max(8px, env(safe-area-inset-top, 0px)) + var(--vv-top, 0px));
+			bottom: calc(max(var(--bar, 0px), var(--vv-bottom, 0px)) + 8px);
+		}
+
+		.dialog.left,
+		.dialog.right {
+			right: 8px;
+			left: 8px;
+			width: auto;
+			border: 2px solid var(--background);
+		}
+
+		.dialog.peek {
+			top: auto;
+			height: max(260px, 40dvh);
+		}
 	}
 </style>

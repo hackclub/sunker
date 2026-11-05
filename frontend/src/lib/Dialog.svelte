@@ -80,6 +80,14 @@
 		color: var(--text);
 	}
 
+	@media (pointer: coarse) {
+		header button {
+			width: 44px;
+			height: 44px;
+			margin: -8px -6px;
+		}
+	}
+
 	svg {
 		width: 16px;
 		height: 16px;

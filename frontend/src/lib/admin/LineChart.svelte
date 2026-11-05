@@ -24,6 +24,7 @@
 	let width = $state(0);
 	let active: number | null = $state(null);
 	let svg: SVGSVGElement | undefined = $state();
+	let tip = $state(0);
 
 	const pad = $derived(
 		axes ? { top: 12, right: 16, bottom: 28, left: 48 } : { top: 8, right: 6, bottom: 4, left: 6 }
@@ -93,6 +94,14 @@
 		active = Math.min(points.length - 1, Math.max(0, Math.round(ratio * (points.length - 1))));
 	}
 
+	function down(event: PointerEvent) {
+		if (axes && event.pointerType !== 'mouse') pick(event);
+	}
+
+	function leave(event: PointerEvent) {
+		if (!axes || event.pointerType === 'mouse') active = null;
+	}
+
 	function key(event: KeyboardEvent) {
 		const last = points.length - 1;
 		const current = active ?? last;
@@ -111,8 +120,16 @@
 		active = Math.min(last, Math.max(0, next));
 	}
 
-	const flip = $derived(active !== null && x(active) > width / 2);
+	const left = $derived.by(() => {
+		if (active === null) return 0;
+		const px = x(active);
+		if (px + 12 + tip <= width) return px + 12;
+		if (px - 12 - tip >= 0) return px - 12 - tip;
+		return Math.max(0, Math.min(width - tip, px - tip / 2));
+	});
 </script>
+
+<svelte:window onpointerdown={(event) => svg?.contains(event.target as Node) || (active = null)} />
 
 <span class="chart" bind:clientWidth={width} style:height="{height}px">
 	{#if width}
@@ -130,8 +147,10 @@
 				: 'No data'}
 			tabindex={axes ? 0 : undefined}
 			aria-hidden={!axes}
+			onpointerdown={down}
 			onpointermove={pick}
-			onpointerleave={() => (active = null)}
+			onpointerleave={leave}
+			onpointercancel={() => (active = null)}
 			onfocus={() => (active = active ?? points.length - 1)}
 			onblur={() => (active = null)}
 			onkeydown={key}
@@ -180,9 +199,10 @@
 		{#if active !== null}
 			<span
 				class="tooltip"
-				class:flip
-				style:left="{x(active)}px"
+				bind:clientWidth={tip}
+				style:left="{left}px"
 				style:top="{pad.top}px"
+				style:visibility={tip ? undefined : 'hidden'}
 			>
 				<span class="date">{points[active].label}</span>
 				<span class="row">
@@ -279,7 +299,6 @@
 		flex-direction: column;
 		gap: 4px;
 		position: absolute;
-		transform: translateX(12px);
 		padding: 8px 10px;
 		border: 1px solid var(--tip-border);
 		border-radius: 8px;
@@ -288,10 +307,6 @@
 		white-space: nowrap;
 		pointer-events: none;
 		z-index: 1;
-	}
-
-	.tooltip.flip {
-		transform: translateX(calc(-100% - 12px));
 	}
 
 	.date {

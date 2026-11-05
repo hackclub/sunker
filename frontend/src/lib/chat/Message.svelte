@@ -28,10 +28,19 @@
 	let { message, flagged = false, flashing = false, onflag, onreply, onjump, ondelete, meta }: Props = $props();
 
 	const time = $derived(new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+
+	let root: HTMLElement;
+	let picked = $state(false);
 </script>
 
+<svelte:window onpointerdown={(event) => picked && event.target instanceof Node && !root.contains(event.target) && (picked = false)} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <article
+	bind:this={root}
 	data-message={message.id}
+	class:picked
+	onclick={(event) => event.target instanceof Element && !event.target.closest('.quote, .tools') && (picked = !picked)}
 	class:flagged
 	class:flashing
 	class:reply={message.reply_to}
@@ -214,6 +223,18 @@
 
 	.tools button.active {
 		color: var(--flag);
+	}
+
+	@media (hover: none) {
+		article.picked .tools {
+			opacity: 1;
+			pointer-events: auto;
+		}
+
+		.tools button {
+			width: 40px;
+			height: 40px;
+		}
 	}
 
 	svg {

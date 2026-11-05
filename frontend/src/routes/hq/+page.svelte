@@ -1,5 +1,5 @@
 <script lang="ts">
-	import SidePanel, { DIALOG_WIDTH, offset } from '#lib/SidePanel.svelte';
+	import SidePanel, { DIALOG_WIDTH, SPLIT, offset } from '#lib/SidePanel.svelte';
 	import { PALETTE } from '#lib/colors.js';
 	import { image } from '#lib/styles.svelte.js';
 	import WorldMap from '#lib/WorldMap.svelte';
@@ -7,7 +7,7 @@
 	import { params, update } from '#lib/url.svelte.js';
 	import { page } from '$app/state';
 	import { place, type PlacedTile } from '#lib/map.js';
-	import { FLIGHT, crest, footprint, halo, inside, island, reveal, table as tabled } from '#lib/view.js';
+	import { BAR, FLIGHT, PHONE, crest, footprint, halo, inside, island, reveal, stage, transform, unseat } from '#lib/view.js';
 	import Projects from '#lib/hq/Projects.svelte';
 	import Propaganda from '#lib/hq/Propaganda.svelte';
 	import Orders from '#lib/hq/Orders.svelte';
@@ -24,8 +24,9 @@
 	import { advance, draft, me } from '#lib/me.svelte.js';
 	import { FAREWELL, GUILDS, QUIPS, TOUR, tilt as turn } from '#lib/robosquirrel.js';
 	import { goto } from '$app/navigation';
-	import type { Component } from 'svelte';
+	import { tick, type Component } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import { MediaQuery } from 'svelte/reactivity';
 
 	let { data } = $props();
 
@@ -54,8 +55,15 @@
 	});
 
 	function toggle(side: Side, index: number) {
-		update({ [side]: open[side] && active[side] === index ? null : slug(panels[side][index]) });
+		const shut = open[side] && active[side] === index;
+		const changes: Record<string, string | null> = { [side]: shut ? null : slug(panels[side][index]) };
+		if (!shut && innerWidth < SPLIT) changes[side === 'left' ? 'right' : 'left'] = null;
+		update(changes);
 	}
+
+	$effect(() => {
+		if (innerWidth && innerWidth < SPLIT && open.left && open.right) update({ [chatting ? 'left' : 'right']: null }, { replace: true });
+	});
 
 	type Stop = { text?: string; area?: 'map' | 'mines'; spots: string[] };
 
@@ -173,10 +181,54 @@
 
 	let innerWidth = $state(0);
 	let innerHeight = $state(0);
-	const shrink = $derived(booklet ? Math.min(1, (innerHeight - 72 - assigned) / booklet) : 1);
+	let viewportTop = $state(0);
+	let viewportBottom = $state(0);
+
+	$effect(() => {
+		const visual = window.visualViewport;
+		if (!visual) return;
+		const sync = () => {
+			const zoomed = visual.scale > 1.01;
+			viewportTop = zoomed ? 0 : Math.round(visual.offsetTop);
+			viewportBottom = zoomed ? 0 : Math.max(0, Math.round(window.innerHeight - visual.offsetTop - visual.height));
+		};
+		sync();
+		visual.addEventListener('resize', sync);
+		visual.addEventListener('scroll', sync);
+		return () => {
+			visual.removeEventListener('resize', sync);
+			visual.removeEventListener('scroll', sync);
+		};
+	});
+	let probe: HTMLElement;
+	let insets = $state({ top: 0, bottom: 0 });
+	const portrait = $derived(innerHeight > innerWidth);
+	const dock = $derived(portrait && innerWidth <= PHONE ? BAR + insets.bottom : 0);
+	let sheet = $state(0);
+	let ceiling = $state(0);
+	const hidden = $derived(sheet ? sheet + 8 + dock : 0);
+	$effect(() => {
+		innerHeight;
+		if (!dock || planner.selectable === null) return void (sheet = ceiling = 0);
+		tick().then(() => {
+			sheet = document.querySelector<HTMLElement>('.dialog.peek')?.offsetHeight ?? 0;
+			ceiling = document.querySelector('.resources')?.getBoundingClientRect().bottom ?? 0;
+		});
+	});
+	const covered = $derived(planner.selectable !== null && innerWidth < DIALOG_WIDTH * 2 && !dock);
+	const hud = $derived(innerWidth >= 640 ? 82 : 118);
+	const span = $derived(portrait ? Math.max(innerWidth, innerHeight * 0.9) : innerWidth);
+
+	$effect(() => {
+		innerWidth;
+		innerHeight;
+		const style = getComputedStyle(probe);
+		insets = { top: parseFloat(style.paddingTop) || 0, bottom: parseFloat(style.paddingBottom) || 0 };
+	});
+
+	const shrink = $derived(booklet ? Math.min(1, (innerHeight - 72 - (dock ? dock + 52 : 0) - assigned) / booklet) : 1);
 	let ratio = $state(1);
 	let natural = $state(0);
-	const wall = $derived(Math.round((innerHeight * ratio) / 3));
 	let floor: HTMLCanvasElement;
 	let windows: HTMLCanvasElement;
 	let images: HTMLImageElement[] = $state([]);
@@ -198,26 +250,36 @@
 	}
 
 	const tiles = $derived(place(data.map));
-	const pose = $derived(tabled(tiles, innerWidth, innerHeight));
+	const layout = $derived(stage(tiles, innerWidth, innerHeight, insets.top, insets.bottom, hud, portrait));
+	const wall = $derived(Math.round(layout.wall * ratio));
+	const pose = $derived(transform(layout.pose));
 	const outline = $derived(island(tiles, innerWidth, innerHeight));
 	const clip = $derived(footprint(outline));
-	const border = $derived(halo(outline, tiles, innerWidth, innerHeight));
+	const border = $derived(halo(outline, tiles, layout.pose, innerWidth, innerHeight));
 	const mine = (tile: PlacedTile) => tile.tile.variants.includes('mine');
 	const shaft = $derived(outline.filter((_, i) => mine(tiles[i])));
-	const seam = $derived(halo(outline, tiles, innerWidth, innerHeight, mine));
-	const top = $derived(crest(outline, tiles, innerWidth, innerHeight));
+	const seam = $derived(halo(outline, tiles, layout.pose, innerWidth, innerHeight, mine));
+	const top = $derived(crest(outline, layout.pose, innerWidth, innerHeight));
 	let hovering = $state<'map' | 'mines' | null>(null);
 	const shown = $derived(current ? (current.area ?? null) : hovering);
 
 	function over(event: PointerEvent | MouseEvent) {
-		const box = flight.getBoundingClientRect();
-		const point: [number, number] = [((event.clientX - box.left) / box.width) * innerWidth, ((event.clientY - box.top) / box.height) * innerHeight];
+		const point = unseat(layout.pose, innerWidth, innerHeight)([event.clientX, event.clientY]);
 		return inside(shaft, point) ? 'mines' : inside(outline, point) ? 'map' : null;
 	}
 
 	function onpointermove(event: PointerEvent) {
 		hovering = !docked || mining || (event.target instanceof Element && event.target.closest('.crowd')) ? null : over(event);
 	}
+
+	function release(event: PointerEvent) {
+		if (event.pointerType !== 'mouse') hovering = null;
+	}
+
+	$effect(() => {
+		document.documentElement.style.overscrollBehavior = 'none';
+		return () => document.documentElement.style.removeProperty('overscroll-behavior');
+	});
 
 	const wanted = $derived(params().has('map'));
 	const mining = $derived(params().has('mines'));
@@ -228,7 +290,7 @@
 	let keyframes: ReturnType<typeof reveal> | undefined;
 
 	$effect(() => {
-		const size = [tiles, innerWidth, innerHeight] as const;
+		const size = [tiles, innerWidth, innerHeight, layout.pose] as const;
 		keyframes = undefined;
 		if (!innerWidth || !innerHeight) return;
 		const later = window.requestIdleCallback ?? setTimeout;
@@ -237,12 +299,18 @@
 		return () => cancel(id);
 	});
 
+	const touch = new MediaQuery('(hover: none)');
+
+	function enter(target: 'map' | 'mines') {
+		if (target === 'map') update({ map: true }, { state: { map: true } });
+		else dig();
+	}
+
 	function onclick(event: MouseEvent) {
 		event.preventDefault();
 		if (wanted || mining || current) return;
 		const target = event.detail === 0 ? 'map' : over(event);
-		if (target === 'map') update({ map: true }, { state: { map: true } });
-		if (target === 'mines') dig();
+		if (target) enter(target);
 	}
 
 	function dig() {
@@ -283,7 +351,7 @@
 				animation.startTime = now - at / animation.playbackRate;
 			});
 		} else {
-			const { grow, spread } = keyframes ?? reveal(tiles, innerWidth, innerHeight);
+			const { grow, spread } = keyframes ?? reveal(tiles, innerWidth, innerHeight, layout.pose);
 			const options: KeyframeAnimationOptions = { duration: FLIGHT, fill: 'both', direction: opening ? 'normal' : 'reverse' };
 			animations = [flight.animate(grow, options), flight.animate(spread, options)];
 		}
@@ -325,7 +393,7 @@
 		const height = Math.round(innerHeight * dpr);
 		const focal = height;
 		const pitch = (ANGLE * Math.PI) / 180;
-		const camera = (focal * Math.sin(pitch)) / (innerWidth * SCALE * dpr);
+		const camera = (focal * Math.sin(pitch)) / (span * SCALE * dpr);
 
 		const project = (y: number) => {
 			const tilt = Math.atan((y + 0.5 - height / 2) / focal);
@@ -436,6 +504,8 @@
 	bind:innerHeight
 	{onkeydown}
 	{onpointermove}
+	onpointerup={release}
+	onpointercancel={release}
 	onpointerdown={(event) => {
 		if (!(event.target instanceof Element && event.target.closest('.corner'))) quip = null;
 	}}
@@ -447,12 +517,22 @@
 	<title>{mining ? 'Mines' : wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
 </svelte:head>
 
-<div class="hq" class:chatting>
+<div
+	class="hq"
+	class:chatting
+	class:covered
+	class:portrait
+	class:phone={dock > 0}
+	style:--slots={panels.left.length + panels.right.length}
+	style:--vv-top="{viewportTop}px"
+	style:--vv-bottom="{viewportBottom}px"
+>
+	<div class="insets" bind:this={probe}></div>
 	<canvas class="floor" class:smooth={SMOOTH} bind:this={floor}></canvas>
 	<canvas class="windows" class:smooth={SMOOTH} style:height="{wall / ratio}px" bind:this={windows}></canvas>
 
-	<div class="corner" class:touring={!!current} class:away={!docked} style:top="{wall / ratio}px">
-		<Robosquirrel mode="bob" {tilt} size="clamp(96px, 11vw, 180px)" onclick={current ? undefined : chatter} />
+	<div class="corner" class:touring={!!current} class:away={!docked} style:top="{wall / ratio}px" style:--guide={layout.guide && `${layout.guide.size}px`}>
+		<Robosquirrel mode="bob" {tilt} size={layout.guide ? `${layout.guide.size}px` : 'clamp(96px, 11vw, 180px)'} onclick={current ? undefined : chatter} />
 		{#if current?.text}
 			<div class="bubble">{#key stop}<Speech bind:this={speech} bind:done={spoken} text={current.text} />{/key}</div>
 		{:else if !current && quip}
@@ -463,8 +543,20 @@
 	<button class="help" class:spotlit={current?.spots.includes('Help')} aria-label="Help"><img src={image('help-icon')} alt="" /><span class="tip left">Help</span></button>
 	<Resources />
 
-	<Crowd />
-	<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
+	<Crowd shape={layout.crowd} avoid={layout.guide && { x: 4, y: layout.guide.top - 14, width: layout.guide.size + 8, height: layout.guide.size + 14 }} />
+	{#if layout.box}
+		<div
+			class="table upright"
+			style:--px="{layout.unit}px"
+			style:left="{layout.box.x}px"
+			style:top="{layout.box.y}px"
+			style:width="{layout.box.width}px"
+			style:height="{layout.box.height}px"
+			style:border-image-source="url({image('table')})"
+		></div>
+	{:else}
+		<img class="table" src={image('table')} alt="" style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
+	{/if}
 	{#if shown && docked}
 		{#if shown === 'mines'}
 			<svg class="outline seam" class:spotlit={!!current} viewBox="0 0 {innerWidth} {innerHeight}">
@@ -477,7 +569,7 @@
 		{:else}
 			<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
 		{/if}
-		<span class="label" class:spotlit={!!current} style:top="{top}px">{shown === 'mines' ? 'Mines' : 'Map'}</span>
+		<span class="label" class:spotlit={!!current} style:left="{top[0]}px" style:top="{top[1]}px">{shown === 'mines' ? 'Mines' : 'Map'}</span>
 	{/if}
 	<a class="enter" href="?map" aria-label="Open map" inert={!!current} class:hovering {onclick} onfocus={() => (hovering = !docked || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
 	<a
@@ -493,9 +585,17 @@
 		onblur={() => (hovering = null)}
 	></a>
 
+	{#if touch.current && docked && !wanted && !mining && !current}
+		<div class="chips">
+			{#each ['map', 'mines'] as const as target}
+				<button class="chip" onpointerdown={() => (hovering = target)} onclick={() => enter(target)}>{target === 'map' ? 'Map' : 'Mines'}</button>
+			{/each}
+		</div>
+	{/if}
+
 	{#each ['left', 'right'] as const as side}
 		{@const section = panels[side][active[side]]}
-		<SidePanel {side} open={open[side]} count={panels[side].length}>
+		<SidePanel {side} open={open[side]} peek={side === 'right' && planner.selectable !== null} count={panels[side].length}>
 			{#snippet dialog()}
 				<header class={side}>
 					<h2>{section.label}</h2>
@@ -510,25 +610,24 @@
 		</SidePanel>
 	{/each}
 
-	{#each { length: Math.max(panels.left.length, panels.right.length) }, i}
-		{#each ['left', 'right'] as const as side}
-			{#if panels[side][i]}
-				{@const { label, icon, disabled, dot } = panels[side][i]}
-				<button
-					class="tab {side}"
-					class:spotlit={current?.spots.includes(label)}
-					aria-label={label}
-					aria-expanded={open[side] && active[side] === i}
-					style:top="calc(50% + {offset(panels[side].length, i)}px)"
-					style:transform={open[side] ? `translateX(${(side === 'left' ? 1 : -1) * (DIALOG_WIDTH + 8)}px)` : null}
-					{disabled}
-					onclick={() => toggle(side, i)}
-				>
-					<img src={image(icon)} alt="" />
-					{#if dot}<span class="dot"></span>{/if}
-					<span class="tip {side}">{label}</span>
-				</button>
-			{/if}
+	{#each ['left', 'right'] as const as side, s}
+		{#each panels[side] as { label, icon, disabled, dot }, i}
+			<button
+				class="tab {side}"
+				class:spotlit={current?.spots.includes(label)}
+				class:open={open[side] && !covered}
+				aria-label={label}
+				aria-expanded={open[side] && active[side] === i}
+				style:--offset="{offset(panels[side].length, i)}px"
+				style:--slot={s * panels.left.length + i}
+				style:--dialog-width="{DIALOG_WIDTH}px"
+				{disabled}
+				onclick={() => toggle(side, i)}
+			>
+				<img src={image(icon)} alt="" />
+				{#if dot}<span class="dot"></span>{/if}
+				<span class="tip {side}">{label}</span>
+			</button>
 		{/each}
 	{/each}
 
@@ -538,6 +637,8 @@
 			territory={data.territory}
 			table={!wanted}
 			arrows={!mining}
+			covered={hidden}
+			cleared={ceiling}
 			selectable={planner.selectable}
 			selected={planner.selected}
 			route={planner.path}
@@ -583,9 +684,12 @@
 
 <style>
 	.hq {
+		--bar: 0px;
 		color: var(--text);
 		color-scheme: dark;
 		font: 13px 'Inter', sans-serif;
+		touch-action: manipulation;
+		-webkit-tap-highlight-color: transparent;
 	}
 
 	.hq :global(.button) {
@@ -675,6 +779,18 @@
 		stroke-linecap: round;
 	}
 
+	@media (pointer: coarse) {
+		.hq :global(.button) {
+			min-height: 44px;
+		}
+
+		.close {
+			width: 44px;
+			height: 44px;
+			margin: -10px -8px -10px 0;
+		}
+	}
+
 	.body {
 		padding: 0 20px 16px;
 	}
@@ -757,6 +873,7 @@
 
 	.tab {
 		position: fixed;
+		top: calc(50% + var(--offset));
 		z-index: 21;
 		transition: transform 0.25s ease;
 	}
@@ -767,6 +884,26 @@
 
 	.tab.right {
 		right: 0;
+	}
+
+	.tab.left.open {
+		transform: translateX(calc(min(var(--dialog-width), 100vw - 144px) + 8px));
+	}
+
+	.tab.right.open {
+		transform: translateX(calc(-1 * (min(var(--dialog-width), 100vw - 144px) + 8px)));
+	}
+
+	.covered :global(.dialog.open.left) {
+		transform: translateX(calc(-100% - 8px));
+	}
+
+	.covered :global(.dialog.open.right) {
+		transform: translateX(calc(100% + 8px));
+	}
+
+	.covered :global(.panel.open) {
+		--shift: 0px;
 	}
 
 	button:focus-visible {
@@ -830,13 +967,14 @@
 
 	.back {
 		position: fixed;
-		top: 16px;
-		left: 16px;
+		top: calc(16px + env(safe-area-inset-top, 0px));
+		left: calc(16px + env(safe-area-inset-left, 0px));
 		width: 48px;
 		height: 48px;
 		border: 1px solid var(--island-border);
 		border-radius: 6px;
 		background: var(--island);
+		touch-action: manipulation;
 	}
 
 	.back:hover {
@@ -851,6 +989,12 @@
 		stroke-width: 2.5;
 		stroke-linecap: round;
 		stroke-linejoin: round;
+	}
+
+	@media (max-height: 460px) and (orientation: landscape) {
+		.back {
+			left: calc(72px + env(safe-area-inset-left, 0px));
+		}
 	}
 
 	.enter {
@@ -868,6 +1012,38 @@
 		height: 1px;
 		overflow: hidden;
 		clip-path: inset(50%);
+	}
+
+	.chips {
+		position: fixed;
+		right: 16px;
+		bottom: 26px;
+		z-index: 12;
+		display: flex;
+		gap: 8px;
+	}
+
+	.phone .chips {
+		bottom: calc(var(--bar) + 22px);
+	}
+
+	@media (orientation: landscape) and (max-height: 520px) {
+		.chips {
+			right: 88px;
+		}
+	}
+
+	.chip {
+		width: auto;
+		height: 44px;
+		padding: 0 18px;
+		border: 1px solid var(--island-border);
+		background: var(--island);
+		font: 500 13px 'Inter', sans-serif;
+	}
+
+	.chip:active {
+		background: var(--hover);
 	}
 
 	.corner {
@@ -922,6 +1098,19 @@
 
 	.corner .bubble :global(.speech) {
 		font-size: 15px;
+	}
+
+	.portrait .corner {
+		left: 12px;
+	}
+
+	.portrait .corner .bubble {
+		top: -40%;
+		width: min(420px, calc(100vw - var(--guide) - 36px));
+	}
+
+	.portrait .corner .bubble::before {
+		top: calc(var(--guide) * 0.65 - 8px);
 	}
 
 	.dim {
@@ -1034,6 +1223,12 @@
 		stroke-linejoin: round;
 	}
 
+	@media (pointer: coarse) {
+		.rewind {
+			min-height: 44px;
+		}
+	}
+
 	.help {
 		position: fixed;
 		bottom: 16px;
@@ -1052,6 +1247,54 @@
 		top: 50%;
 	}
 
+	.phone .help {
+		bottom: calc(var(--bar) + 12px);
+	}
+
+	.phone:has(.flight.open) .help {
+		bottom: calc(var(--bar) + 16px);
+		left: calc(16px + env(safe-area-inset-left, 0px));
+		width: 48px;
+		height: 48px;
+	}
+
+	.phone:has(.flight.open) .help img {
+		width: 32px;
+		height: 32px;
+	}
+
+	@media (orientation: landscape) and (max-height: 460px) {
+		.hq:has(.flight.open) .help {
+			bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+			left: calc(72px + env(safe-area-inset-left, 0px));
+			width: 48px;
+			height: 48px;
+		}
+
+		.hq:has(.flight.open) .help img {
+			width: 32px;
+			height: 32px;
+		}
+	}
+
+	.phone .rewind {
+		right: 16px;
+		bottom: calc(var(--bar) + 22px);
+		left: auto;
+	}
+
+	.phone.chatting .rewind {
+		top: calc(max(8px, env(safe-area-inset-top, 0px)) + 4px);
+		right: auto;
+		bottom: auto;
+		left: 50%;
+		translate: -50% 0;
+	}
+
+	.phone .stamp {
+		padding-bottom: calc(var(--bar) + 68px);
+	}
+
 	.arrive {
 		position: fixed;
 		inset: 0;
@@ -1067,6 +1310,13 @@
 		}
 	}
 
+	@media (orientation: landscape) and (max-height: 520px) {
+		.help,
+		.rewind {
+			left: 88px;
+		}
+	}
+
 	.table {
 		position: fixed;
 		top: 50%;
@@ -1077,5 +1327,159 @@
 		filter: drop-shadow(var(--px) 0 var(--table-edge)) drop-shadow(calc(-1 * var(--px)) 0 var(--table-edge))
 			drop-shadow(0 var(--px) var(--table-edge)) drop-shadow(0 calc(-1 * var(--px)) var(--table-edge));
 		pointer-events: none;
+	}
+
+	.table.upright {
+		box-sizing: border-box;
+		transform: none;
+		border-style: solid;
+		border-color: transparent;
+		border-width: calc(56 * var(--px)) calc(130 * var(--px)) calc(75 * var(--px)) calc(130 * var(--px));
+		border-image-slice: 56 130 75 130 fill;
+		border-image-width: 1;
+		border-image-repeat: stretch;
+		image-rendering: pixelated;
+	}
+
+	.insets {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 0;
+		height: 0;
+		padding-top: env(safe-area-inset-top);
+		padding-bottom: env(safe-area-inset-bottom);
+		visibility: hidden;
+		pointer-events: none;
+	}
+
+	@media (pointer: coarse), (orientation: portrait) and (max-width: 600px) {
+		header {
+			flex: none;
+		}
+
+		.body {
+			display: flex;
+			flex: 1;
+			flex-direction: column;
+			min-height: 0;
+			overflow: auto;
+			overscroll-behavior: contain;
+		}
+	}
+
+	@media (hover: none) {
+		.tab {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 2px;
+		}
+
+		.tab img {
+			width: 40px;
+			height: 40px;
+			image-rendering: auto;
+		}
+
+		.tab .tip {
+			position: static;
+			padding: 0;
+			border: none;
+			background: none;
+			font: 500 10px/12px 'Inter', sans-serif;
+			transform: none;
+			visibility: visible;
+		}
+
+		.tab .dot {
+			top: 6px;
+			left: 6px;
+			width: 14px;
+			height: 14px;
+		}
+	}
+
+	@media (orientation: portrait) and (max-width: 600px) {
+		.hq {
+			--bar: calc(64px + env(safe-area-inset-bottom, 0px));
+		}
+
+		.tab,
+		.tab.left,
+		.tab.right {
+			top: auto;
+			right: auto;
+			bottom: 0;
+			left: calc(var(--slot) * 100% / var(--slots));
+			box-sizing: border-box;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 2px;
+			width: calc(100% / var(--slots));
+			height: var(--bar);
+			padding: 0 0 env(safe-area-inset-bottom, 0px);
+			border-radius: 0;
+			-webkit-tap-highlight-color: transparent;
+		}
+
+		.tab.left.open,
+		.tab.right.open {
+			transform: none;
+		}
+
+		.tab img {
+			box-sizing: content-box;
+			width: 36px;
+			height: 36px;
+			padding: 2px 6px;
+			border-radius: 12px;
+			image-rendering: auto;
+		}
+
+		.tab .tip {
+			position: static;
+			padding: 0;
+			border: none;
+			background: none;
+			font: 500 clamp(9px, 2.7vw, 11px) / 12px 'Inter', sans-serif;
+			transform: none;
+			visibility: visible;
+		}
+
+		.tab .dot {
+			top: 4px;
+			left: calc(50% + 6px);
+			width: 12px;
+			height: 12px;
+		}
+
+		.tab:hover:enabled,
+		.tab.spotlit {
+			background: none;
+		}
+
+		.tab[aria-expanded='true'] img,
+		.tab:active:enabled img,
+		.tab.spotlit img {
+			background: var(--hover);
+		}
+
+		.tab[aria-expanded='true'] .tip {
+			color: var(--accent);
+		}
+
+		.chatting :global(.panel.right) {
+			z-index: 20;
+		}
+	}
+
+	@media (orientation: portrait) and (max-width: 600px) and (hover: hover) {
+		.tab:hover:enabled img {
+			background: var(--hover);
+		}
 	}
 </style>

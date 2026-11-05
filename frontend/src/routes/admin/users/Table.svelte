@@ -118,4 +118,10 @@
 	.link:hover {
 		text-decoration: underline;
 	}
+
+	@media (pointer: coarse) {
+		.link {
+			padding: 8px 0;
+		}
+	}
 </style>

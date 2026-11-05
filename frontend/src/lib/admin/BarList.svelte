@@ -23,14 +23,14 @@
 <style>
 	.bars {
 		display: grid;
-		grid-template-columns: max-content 1fr max-content;
+		grid-template-columns: fit-content(45%) minmax(40px, 1fr) max-content;
 		row-gap: 2px;
 		column-gap: 12px;
 		align-items: center;
 	}
 
 	.bars.details {
-		grid-template-columns: max-content 1fr max-content max-content;
+		grid-template-columns: fit-content(45%) minmax(40px, 1fr) max-content max-content;
 	}
 
 	.row {
@@ -48,8 +48,12 @@
 	}
 
 	.name {
+		min-width: 0;
+		overflow: hidden;
 		color: var(--text-muted);
 		font-size: 13px;
+		white-space: nowrap;
+		text-overflow: ellipsis;
 	}
 
 	.track {

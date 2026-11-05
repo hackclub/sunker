@@ -23,6 +23,12 @@
 	let unit = $state(1);
 	let suppress = false;
 	let resetting = $state(false);
+	let width = $state(0);
+
+	const coarse = matchMedia('(pointer: coarse)').matches;
+	const scale = $derived(width / PHOTO.width);
+	const reach = (shape: Shape) => (coarse && scale ? Math.max(shape.reach, 22 / scale) : shape.reach);
+	const grip = $derived(coarse && scale ? 18 / scale : 3);
 
 	$effect.pre(() => {
 		void features;
@@ -46,7 +52,7 @@
 		event.preventDefault();
 		measure();
 		selected = null;
-		drag = { shape, colour: colour(swatch), rotation: 0, x: event.clientX, y: event.clientY, dx: 0, dy: 0, index: null };
+		drag = { shape, colour: colour(swatch), rotation: 0, x: event.clientX, y: event.clientY, dx: 0, dy: event.pointerType === 'touch' ? -56 : 0, index: null };
 	}
 
 	function hold(event: PointerEvent, index: number) {
@@ -93,6 +99,11 @@
 		features[drag.index].y = y;
 	}
 
+	function onpointercancel() {
+		turning = null;
+		drag = null;
+	}
+
 	function onpointerup() {
 		turning = null;
 		if (!drag) return;
@@ -135,9 +146,13 @@
 			remove(index);
 		}
 	}
+
+	$effect(() => {
+		if (open && matchMedia('(max-width: 640px), (max-height: 500px), (pointer: coarse)').matches) photo.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+	});
 </script>
 
-<svelte:window {onpointermove} {onpointerup} />
+<svelte:window {onpointermove} {onpointerup} {onpointercancel} />
 
 {#snippet art(shape: Shape, fill: string)}
 	{#each shape.strokes as stroke, i (i)}
@@ -146,7 +161,7 @@
 {/snippet}
 
 <div class="headshot">
-	<div class="photo" class:missing class:readonly role="presentation" bind:this={photo} onpointerdown={() => (suppress = false)}>
+	<div class="photo" class:missing class:readonly role="presentation" bind:this={photo} bind:clientWidth={width} onpointerdown={() => (suppress = false)}>
 		{#if !readonly}<button class="trigger" type="button" aria-label={open ? 'Deselect feature' : 'Edit headshot'} aria-expanded={open} {onclick}></button>{/if}
 		<svg viewBox="0 0 {PHOTO.width} {PHOTO.height}" aria-hidden={features.length === 0}>
 			<path d={SILHOUETTE} style:fill={tint('passport-silhouette', hue ?? HUE)} />
@@ -163,16 +178,23 @@
 						onkeydown={(event) => onkeydown(event, i)}
 						onfocus={() => (selected = i)}
 					>
-						<circle class="hit" r={shape.reach} />
+						<circle class="hit" r={reach(shape)} />
 						{@render art(shape, feature.colour)}
-						{#if selected === i && !drag}
-							<circle class="ring" r={shape.reach + 1} />
-							<line class="stem" y1={-shape.reach - 1} y2={-shape.reach - 7} />
-							<circle class="handle" role="presentation" cy={-shape.reach - 9} r="3" onpointerdown={(event) => turn(event, i)} />
-						{/if}
 					</g>
 				{/if}
 			{/each}
+			{#if selected !== null && !drag && features[selected]}
+				{@const feature = features[selected]}
+				{@const shape = SHAPES.get(feature.shape)}
+				{#if shape}
+					<g class="controls" transform="translate({feature.x * PHOTO.width} {feature.y * PHOTO.height}) rotate({feature.rotation})">
+						<circle class="ring" r={shape.reach + 1} />
+						<line class="stem" y1={-shape.reach - 1} y2={-shape.reach - 7} />
+						<circle class="grip" role="presentation" cy={-shape.reach - 9} r={grip} onpointerdown={(event) => turn(event, selected!)} />
+						<circle class="handle" cy={-shape.reach - 9} r="3" />
+					</g>
+				{/if}
+			{/if}
 		</svg>
 	</div>
 
@@ -241,6 +263,7 @@
 		border: 1px solid var(--passport-guilloche);
 		border-radius: 4px;
 		background: var(--passport-photo);
+		scroll-margin-top: 12px;
 	}
 
 	.photo.missing {
@@ -287,6 +310,10 @@
 		fill: transparent;
 	}
 
+	.controls {
+		pointer-events: none;
+	}
+
 	.ring {
 		fill: none;
 		stroke: var(--accent);
@@ -299,11 +326,18 @@
 		stroke-width: 0.8;
 	}
 
+	.grip {
+		fill: transparent;
+		cursor: grab;
+		pointer-events: auto;
+		touch-action: none;
+	}
+
 	.handle {
 		fill: var(--accent);
 		stroke: white;
 		stroke-width: 0.8;
-		cursor: grab;
+		pointer-events: none;
 	}
 
 	.tray {
@@ -374,8 +408,10 @@
 		touch-action: none;
 	}
 
-	.item:hover {
-		border-color: var(--accent);
+	@media (hover: hover) {
+		.item:hover {
+			border-color: var(--accent);
+		}
 	}
 
 	.item svg {
@@ -450,9 +486,11 @@
 		cursor: pointer;
 	}
 
-	.start:hover:enabled,
-	.actions button:hover {
-		background: var(--hover);
+	@media (hover: hover) {
+		.start:hover:enabled,
+		.actions button:hover {
+			background: var(--hover);
+		}
 	}
 
 	.start:disabled {
@@ -484,6 +522,37 @@
 		color: var(--negative);
 	}
 
+	@media (pointer: coarse) {
+		.close {
+			width: 40px;
+			height: 40px;
+			margin: -9px -9px -9px 0;
+		}
+
+		.tone input {
+			box-sizing: content-box;
+			border: solid transparent;
+			border-width: 16px 0;
+			border-radius: 6px / 22px;
+			background-clip: padding-box;
+		}
+
+		.tone input::-webkit-slider-thumb {
+			width: 24px;
+			height: 24px;
+		}
+
+		.tone input::-moz-range-thumb {
+			width: 20px;
+			height: 20px;
+		}
+
+		.start,
+		.actions button {
+			min-height: 44px;
+		}
+	}
+
 	.ghost {
 		position: fixed;
 		z-index: 100;
@@ -496,14 +565,45 @@
 		opacity: 0.4;
 	}
 
+	@media (min-width: 641px) and (max-height: 500px) {
+		.tray {
+			position: fixed;
+			inset: 0 0 0 auto;
+			box-sizing: border-box;
+			width: min(300px, 56vw);
+			overflow-y: auto;
+			border-radius: 12px 0 0 12px;
+		}
+	}
+
 	@media (max-width: 640px) {
 		.tray {
 			position: fixed;
-			inset: auto 0 0;
+			inset: auto 0 var(--bar, 0px);
 			width: auto;
-			max-height: 50vh;
+			max-height: 50dvh;
 			overflow-y: auto;
 			border-radius: 12px 12px 0 0;
+		}
+	}
+
+	@media (max-width: 640px), (max-height: 500px) {
+		.tray {
+			overscroll-behavior: contain;
+		}
+
+		.grid {
+			grid-template-columns: none;
+			grid-template-rows: repeat(2, 44px);
+			grid-auto-flow: column;
+			grid-auto-columns: 44px;
+			overflow-x: auto;
+			overscroll-behavior-x: contain;
+			scrollbar-width: thin;
+		}
+
+		.item {
+			touch-action: pan-x;
 		}
 	}
 </style>

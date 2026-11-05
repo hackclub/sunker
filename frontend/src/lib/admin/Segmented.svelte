@@ -27,7 +27,10 @@
 <style>
 	.segmented {
 		display: inline-flex;
+		max-width: 100%;
 		padding: 2px;
+		overflow-x: auto;
+		scrollbar-width: none;
 		border: 1px solid var(--island-border);
 		border-radius: 8px;
 		background: var(--background);
@@ -41,6 +44,7 @@
 		color: var(--text-muted);
 		font: inherit;
 		font-size: 13px;
+		white-space: nowrap;
 		cursor: pointer;
 	}
 
@@ -56,5 +60,12 @@
 	button:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: -2px;
+	}
+
+	@media (pointer: coarse) {
+		button {
+			min-height: 44px;
+			padding: 0 14px;
+		}
 	}
 </style>

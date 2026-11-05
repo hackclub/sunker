@@ -38,7 +38,8 @@
 <p class="speech" aria-live="polite">
 	<span class="sr">{parts.map((part) => part.value).join('')}</span>
 	<span class="text" aria-hidden="true">
-		{#each visible as part, i (i)}{#if part.emphasis}<em>{part.value}</em>{:else}{part.value}{/if}{/each}
+		<span class="full">{#each parts as part, i (i)}{#if part.emphasis}<em>{part.value}</em>{:else}{part.value}{/if}{/each}</span>
+		<span class="typed">{#each visible as part, i (i)}{#if part.emphasis}<em>{part.value}</em>{:else}{part.value}{/if}{/each}</span>
 	</span>
 	<span class="more" class:done aria-hidden="true"></span>
 </p>
@@ -62,7 +63,17 @@
 	}
 
 	.text {
+		display: grid;
 		flex: 1;
+	}
+
+	.full,
+	.typed {
+		grid-area: 1 / 1;
+	}
+
+	.full {
+		visibility: hidden;
 	}
 
 	.more {

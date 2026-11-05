@@ -5,7 +5,7 @@
 </script>
 
 <div class="joel">
-	<section class="stage">
+	<section class="stage" class:bare={!tools}>
 		{@render map()}
 		{#if tools}<div class="tools">{@render tools()}</div>{/if}
 	</section>
@@ -15,10 +15,10 @@
 <style>
 	.joel {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 400px;
+		grid-template-columns: minmax(0, 1fr) clamp(280px, 34vw, 400px);
 		gap: 8px;
-		height: calc(100% + 48px);
-		margin: -16px -16px -32px;
+		height: calc(100% + var(--main-pad-top, 16px) + var(--main-pad-bottom, 32px));
+		margin: calc(var(--main-pad-top, 16px) * -1) calc(var(--main-pad-x, 16px) * -1) calc(var(--main-pad-bottom, 32px) * -1);
 	}
 
 	.stage {
@@ -49,6 +49,37 @@
 		border-radius: 12px;
 		background: var(--island);
 		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	@media (orientation: portrait) and (max-width: 1024px), (max-width: 560px) {
+		.joel {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-rows: minmax(220px, 46%) minmax(0, 1fr);
+		}
+
+		.stage {
+			display: grid;
+			grid-template-rows: auto minmax(0, 1fr);
+		}
+
+		.stage.bare {
+			grid-template-rows: minmax(0, 1fr);
+		}
+
+		.tools {
+			position: static;
+			grid-row: 1;
+			max-width: none;
+			padding: 8px;
+		}
+	}
+
+	@media (max-height: 500px) {
+		aside {
+			gap: 12px;
+			padding: 12px;
+		}
 	}
 
 	.joel :global(:is(.button, .chip)) {
@@ -174,5 +205,23 @@
 		border: 1px solid var(--island-border);
 		border-radius: 8px;
 		background: var(--background);
+	}
+
+	@media (pointer: coarse) {
+		.joel :global(:is(.button, .chip)) {
+			min-height: 44px;
+			padding: 0 12px;
+		}
+
+		.joel :global(:is(input[type='text'], input[type='datetime-local'], textarea)) {
+			min-height: 44px;
+			padding: 8px 10px;
+		}
+	}
+
+	@media (pointer: coarse) and (max-height: 500px) {
+		.joel :global(:is(.button, .chip, input[type='text'], input[type='datetime-local'], textarea)) {
+			min-height: 36px;
+		}
 	}
 </style>

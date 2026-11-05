@@ -23,6 +23,8 @@
 
 	let { metric, data }: { metric: Metric; data: Analytics } = $props();
 
+	let innerHeight = $state(0);
+
 	const { preset, range } = $derived(chosenRange(params().get('range'), '30d', data));
 	const granularity: Exclude<Granularity, 'total'> = $derived(
 		hourly(range) ? 'hour' : params().get('by') === 'week' ? 'week' : 'day'
@@ -46,6 +48,8 @@
 			)
 	);
 </script>
+
+<svelte:window bind:innerHeight />
 
 <div class="summary">
 	<span class="value">{format(value, metric.unit)}</span>
@@ -100,7 +104,7 @@
 	points={current}
 	compare={compare ? before.map((point) => point.value) : undefined}
 	unit={metric.unit}
-	height={320}
+	height={innerHeight && innerHeight < 500 ? 200 : 320}
 	axes
 	name={metric.title}
 />
@@ -136,6 +140,7 @@
 <style>
 	.summary {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: baseline;
 		gap: 10px;
 		margin-top: -8px;
@@ -190,6 +195,7 @@
 
 	.legend {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 16px;
 		margin-bottom: -8px;
 		color: var(--text-muted);
@@ -253,5 +259,15 @@
 
 	td {
 		color: var(--text);
+	}
+
+	@media (pointer: coarse) {
+		.toggle {
+			min-height: 44px;
+		}
+
+		summary {
+			padding: 12px 0;
+		}
 	}
 </style>

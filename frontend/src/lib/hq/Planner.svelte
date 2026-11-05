@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { RESOURCE_NAMES } from '#lib/admin/analytics.js';
 	import { describe } from '#lib/effects.js';
 	import { planner, type Hex } from '#lib/hq/planner.svelte.js';
@@ -43,6 +44,7 @@
 	let busy = $state(false);
 	let error = $state('');
 	let amounts = $state<Resources>({});
+	let first = $state<HTMLElement>();
 
 	const map = $derived(page.data.map as HexMap);
 	const territory = $derived((page.data.territory ?? []) as Territory[]);
@@ -98,6 +100,10 @@
 	$effect(() => () => Object.assign(planner, { selectable: null, selected: null, path: null, pick: null }));
 
 	$effect(() => {
+		if (picking) tick().then(() => first?.scrollIntoView({ block: 'nearest' }));
+	});
+
+	$effect(() => {
 		if (operation?.status !== 'gathering') return;
 		amounts = Object.fromEntries(Object.keys(remaining).map((resource) => [resource, 0]));
 	});
@@ -139,7 +145,7 @@
 		<p class="hint">{error || 'Loading operation...'}</p>
 	{:else if operation.status === 'draft'}
 		<ol class="steps">
-			<li class="step">
+			<li class="step" bind:this={first}>
 				<h4><span class="number">1</span>Pick a tile</h4>
 				{@render where()}
 				<button class="button" class:primary={!operation.tile && !picking} disabled={busy} onclick={() => (picking = !picking)}>
@@ -222,7 +228,7 @@
 			{/if}
 		</section>
 		{#if operation.status === 'gathering'}
-			<table>
+			<table class="gather">
 				<thead>
 					<tr><th>Resource</th><th>Allocated</th><th>You have</th><th></th></tr>
 				</thead>
@@ -461,10 +467,16 @@
 
 	.cuprite {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
 		width: 100%;
+	}
+
+	.cuprite > div:first-child {
+		flex: 1 1 160px;
+		min-width: 0;
 	}
 
 	.stepper {
@@ -500,5 +512,53 @@
 	.error {
 		color: var(--negative);
 		font-size: 12px;
+	}
+
+	@media (orientation: portrait) and (max-width: 600px) {
+		.gather,
+		.gather thead,
+		.gather tbody {
+			display: block;
+		}
+
+		.gather tr {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto auto;
+			column-gap: 12px;
+			padding: 6px 0;
+			border-bottom: 1px solid var(--island-border);
+		}
+
+		.gather th,
+		.gather td {
+			padding: 0;
+			border: none;
+		}
+
+		.gather th:last-child {
+			display: none;
+		}
+
+		.gather td:last-child {
+			grid-column: 1 / -1;
+			padding-top: 6px;
+		}
+
+		.gather td:last-child:empty {
+			display: none;
+		}
+	}
+
+	@media (pointer: coarse) {
+		.back {
+			width: 44px;
+			height: 44px;
+			margin: -8px 0 -8px -12px;
+		}
+
+		.stepper .button {
+			width: 44px;
+			min-height: 44px;
+		}
 	}
 </style>

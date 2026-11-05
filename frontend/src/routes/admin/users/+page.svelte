@@ -243,4 +243,24 @@
 	.error {
 		color: var(--negative);
 	}
+
+	@media (max-width: 900px), (max-height: 480px) {
+		.users {
+			position: relative;
+		}
+
+		.users.split {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+
+	@media (pointer: coarse) {
+		input {
+			padding: 12px;
+		}
+
+		td {
+			padding: 14px 10px;
+		}
+	}
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import Dialog from '#lib/admin/Dialog.svelte';
 	import Segmented from '#lib/admin/Segmented.svelte';
 	import { COLOURS, DEFAULTS } from '#lib/colors.js';
@@ -33,6 +34,10 @@
 	let busy = $state(false);
 	let error = $state('');
 	let scope = $state<'images' | 'colours'>('images');
+	let palette = $state(false);
+
+	const narrow = new MediaQuery('max-width: 900px');
+	const folded = $derived(narrow.current && !palette);
 
 	const slot = $derived(styling?.slots.find((s) => s.slug === opened) ?? null);
 	const active = (s: Slot) => s.versions.find((v) => v.active) ?? null;
@@ -229,11 +234,16 @@
 
 	<aside class="palette">
 		<header>
-			<h2>Colours</h2>
-			<input class="find" type="search" placeholder="Search colours" bind:value={find} />
+			<h2>
+				<button type="button" class="fold" aria-expanded={narrow.current ? palette : undefined} disabled={!narrow.current} onclick={() => (palette = !palette)}>
+					Colours
+					<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" /></svg>
+				</button>
+			</h2>
+			{#if !folded}<input class="find" type="search" placeholder="Search colours" bind:value={find} />{/if}
 			{#if error && scope === 'colours'}<p class="error wide">{error}</p>{/if}
 		</header>
-		{#if styling}
+		{#if styling && !folded}
 			{#each groups as [group, keys] (group)}
 				<details open>
 					<summary>{group}</summary>
@@ -244,7 +254,7 @@
 						<div class="colour" class:changed>
 							<input class="swatch" type="color" value={value.slice(0, 7)} aria-label="Pick {label(key)}" disabled={busy} onchange={(event) => setColour(key, event.currentTarget.value + value.slice(7))} />
 							<span class="name" title={key}>{label(key)}</span>
-							<input class="hex" type="text" {value} aria-label="{label(key)} hex" disabled={busy} onchange={(event) => typed(key, event.currentTarget)} />
+							<input class="hex" type="text" {value} aria-label="{label(key)} hex" autocapitalize="off" autocomplete="off" spellcheck="false" enterkeyhint="done" disabled={busy} onchange={(event) => typed(key, event.currentTarget)} />
 							<button class="icon" class:hidden={!changed} title="Reset to default" aria-label="Reset {label(key)} to default" disabled={busy || !changed} onclick={() => setColour(key, null)}>
 								<svg viewBox="0 0 16 16"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5v2.5h2.5" /></svg>
 							</button>
@@ -266,6 +276,7 @@
 										<code>{change.value}</code>
 										<span class="muted grow">{change.active ? 'In use' : when(change.created_at)}</span>
 										{#if !change.active}<button class="link" disabled={busy} onclick={() => setColour(key, change.value)}>Use</button>{/if}
+										<span class="by muted">Set by {display(change.set_by)} {when(change.created_at)}</span>
 									</li>
 								{/each}
 							</ul>
@@ -492,6 +503,28 @@
 		margin: 20px 0 8px;
 	}
 
+	.fold {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 0;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
+		letter-spacing: inherit;
+		text-transform: inherit;
+		cursor: default;
+	}
+
+	.fold svg {
+		display: none;
+	}
+
+	.fold[aria-expanded='true'] svg {
+		transform: rotate(180deg);
+	}
+
 	.progress {
 		display: flex;
 		align-items: center;
@@ -570,6 +603,28 @@
 		display: flex;
 		justify-content: space-between;
 		gap: 8px;
+	}
+
+	.meta strong,
+	.card .muted {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	@media (max-width: 560px) {
+		.grid {
+			grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+		}
+
+		.preview {
+			height: 96px;
+		}
+	}
+
+	@media (max-width: 360px) {
+		.grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 
 	.done {
@@ -672,6 +727,61 @@
 		visibility: hidden;
 	}
 
+	@media (pointer: coarse) {
+		.colour {
+			gap: 8px;
+			padding: 4px 10px;
+		}
+
+		.swatch {
+			width: 44px;
+			height: 44px;
+			border-radius: 8px;
+		}
+
+		.hex {
+			width: 104px;
+			min-height: 44px;
+			padding: 8px 6px;
+			border-color: var(--island-border);
+			background: var(--background);
+		}
+
+		.icon {
+			width: 44px;
+			height: 44px;
+		}
+
+		.icon svg {
+			width: 18px;
+			height: 18px;
+		}
+	}
+
+	@media (max-width: 560px) {
+		.colour {
+			display: grid;
+			grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
+			grid-template-areas:
+				'swatch name name name'
+				'swatch hex . .';
+			align-items: center;
+		}
+
+		.swatch {
+			grid-area: swatch;
+		}
+
+		.name {
+			grid-area: name;
+		}
+
+		.hex {
+			grid-area: hex;
+			width: 100%;
+		}
+	}
+
 	svg {
 		width: 13px;
 		height: 13px;
@@ -718,6 +828,35 @@
 		height: 12px;
 		border: 1px solid var(--island-border);
 		border-radius: 4px;
+	}
+
+	.by {
+		display: none;
+	}
+
+	@media (hover: none) {
+		.history li {
+			flex-wrap: wrap;
+			row-gap: 0;
+		}
+
+		.by {
+			display: block;
+			flex-basis: 100%;
+			padding-left: 20px;
+		}
+	}
+
+	@media (pointer: coarse) {
+		.history {
+			gap: 8px;
+			margin-left: 10px;
+		}
+
+		.link {
+			min-height: 44px;
+			padding: 0 12px;
+		}
 	}
 
 	.check {
@@ -845,6 +984,51 @@
 		flex: 1;
 	}
 
+	@media (max-width: 560px) {
+		.stage {
+			min-height: 180px;
+			padding: 12px;
+		}
+
+		.versions li {
+			flex-wrap: wrap;
+			gap: 8px 12px;
+		}
+
+		.versions .grow {
+			flex: 1 1 calc(100% - 60px);
+			min-width: 0;
+		}
+
+		.versions li > .button {
+			flex: 1 1 0;
+		}
+
+		footer {
+			flex-wrap: wrap;
+		}
+
+		footer .grow {
+			display: none;
+		}
+
+		footer .button {
+			flex: 1 1 auto;
+		}
+	}
+
+	@media (pointer: coarse) {
+		.check {
+			min-height: 44px;
+			gap: 10px;
+		}
+
+		.check input {
+			width: 22px;
+			height: 22px;
+		}
+	}
+
 	form {
 		display: flex;
 		flex-direction: column;
@@ -880,6 +1064,36 @@
 
 	.search {
 		width: 180px;
+	}
+
+	@media (max-width: 560px) {
+		.search {
+			flex: 1 0 100%;
+			width: auto;
+		}
+
+		.images > header .button {
+			flex: 1 1 auto;
+			text-align: center;
+		}
+	}
+
+	@media (pointer: coarse) {
+		.search,
+		.find {
+			min-height: 44px;
+			padding: 8px 10px;
+		}
+
+		form input,
+		form textarea {
+			min-height: 44px;
+			padding: 8px 10px;
+		}
+
+		summary {
+			padding: 16px 12px;
+		}
 	}
 
 	textarea {
@@ -921,6 +1135,17 @@
 		cursor: default;
 	}
 
+	@media (pointer: coarse) {
+		.button {
+			min-height: 44px;
+			padding: 0 14px;
+		}
+
+		.upload {
+			justify-content: center;
+		}
+	}
+
 	.button.primary {
 		border-color: var(--accent);
 		background: var(--accent);
@@ -942,9 +1167,34 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 
+		.images {
+			display: contents;
+		}
+
+		.images > header {
+			order: -2;
+		}
+
 		.palette {
 			position: static;
-			max-height: none;
+			order: -1;
+			max-height: min(70dvh, 560px);
+			overscroll-behavior: contain;
+		}
+
+		h2 {
+			flex: 1 0 100%;
+		}
+
+		.fold {
+			justify-content: space-between;
+			width: 100%;
+			min-height: 44px;
+			cursor: pointer;
+		}
+
+		.fold svg {
+			display: block;
 		}
 	}
 

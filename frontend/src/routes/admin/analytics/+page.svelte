@@ -366,4 +366,10 @@
 			grid-column: auto;
 		}
 	}
+
+	@media (pointer: coarse) {
+		.refresh {
+			min-height: 44px;
+		}
+	}
 </style>

@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { linear } from 'svelte/easing';
+	import { untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import Dialog from '#lib/admin/Dialog.svelte';
 	import Passport from '#lib/onboarding/Passport.svelte';
 	import { HEAD, HUE, SHAPES, tint } from '#lib/features.js';
 	import type { Character, Guild } from '#lib/me.svelte.js';
 	import { params, update } from '#lib/url.svelte.js';
+	import type { Rect, Stage } from '#lib/view.js';
+
+	let { shape = null, avoid = null }: { shape?: Stage['crowd']; avoid?: Rect | null } = $props();
 
 	type Person = { id: number; character: Character; guild: Guild | null };
 
@@ -24,9 +28,30 @@
 	let width = $state(0);
 
 	function point(angle: number): Point {
+		if (shape) return horseshoe(shape, angle);
 		const reach = 1 + Math.random() * 0.12;
 		const x = 512 - Math.cos(angle) * 470 * reach;
 		return { angle, x, y: 150 - Math.sin(angle) * 96 * reach - ((x - 512) * 14) / 833 };
+	}
+
+	function horseshoe({ left, right, top, bottom, person, depth, pad }: NonNullable<Stage['crowd']>, angle: number): Point {
+		const [xl, xr, yl, yf] = [left - person * 0.6, right + person * 0.6, bottom - 8, top + 6];
+		const [up, across] = [yl - yf, xr - xl];
+		const jitter = Math.random() * depth;
+		const fit = (x: number) => Math.max(person / 2 + pad, Math.min(innerWidth - person / 2 - pad, x));
+		let along = (angle / Math.PI) * (2 * up + across);
+		if (along < up) return { angle, x: fit(xl - jitter), y: yl - along };
+		along -= up;
+		if (along < across) return { angle, x: xl + along, y: yf - jitter };
+		return { angle, x: fit(xr + jitter), y: yf + along - across };
+	}
+
+	const apart = (a: Point, b: Point) => (shape ? Math.max(Math.abs(a.x - b.x) / shape.person, Math.abs(a.y - b.y) / (shape.person * 0.87)) : Math.hypot(a.x - b.x, (a.y - b.y) * 4));
+
+	function free(spot: Point) {
+		if (!shape || !avoid) return true;
+		const [half, tall] = [shape.person / 2, shape.person * 1.74];
+		return spot.x + half < avoid.x || spot.x - half > avoid.x + avoid.width || spot.y < avoid.y || spot.y - tall > avoid.y + avoid.height;
 	}
 
 	function pick(id: number, near?: number, clear = (_: Point) => true) {
@@ -36,8 +61,8 @@
 		for (let k = 0; k < 24; k++) {
 			const angle = near === undefined ? Math.random() * Math.PI : Math.min(Math.PI, Math.max(0, near + (Math.random() - 0.5) * 0.8));
 			const candidate = point(angle);
-			if (!clear(candidate)) continue;
-			const nearest = Math.min(Infinity, ...taken.map((other) => Math.hypot(other.x - candidate.x, (other.y - candidate.y) * 4)));
+			if (!clear(candidate) || !free(candidate)) continue;
+			const nearest = Math.min(Infinity, ...taken.map((other) => apart(other, candidate)));
 			if (nearest > gap) [best, gap] = [candidate, nearest];
 		}
 		return best;
@@ -45,11 +70,12 @@
 
 	function place(id: number) {
 		const bob = 2.4 + Math.random() * 1.6;
-		const spot = pick(id)!;
+		const spot = pick(id) ?? point(Math.random() * Math.PI);
 		spots.set(id, { ...spot, bob, delay: -Math.random() * bob, shift: (Math.random() - 0.5) * 10, walking: 0, start: spot.x });
 	}
 
 	function clear(from: Spot, to: Point, others: Spot[]) {
+		if (shape) return others.every((other) => apart(to, other) >= 0.7 && apart({ angle: 0, x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }, other) >= 0.5);
 		const [low, high] = [Math.min(from.x, to.x) - OVERLAP, Math.max(from.x, to.x) + OVERLAP];
 		return others.every((other) => {
 			if (other.walking) return [other.x, other.start].every((x) => x < low || x > high);
@@ -67,7 +93,7 @@
 		const others = [...spots].filter(([other]) => other !== id).map(([, spot]) => spot);
 		const to = pick(id, from.angle, (to) => clear(from, to, others));
 		if (!to) return;
-		const walking = Math.max(800, (((Math.hypot(to.x - from.x, to.y - from.y) / TABLE.width) * width) / 120) * 1000);
+		const walking = Math.max(800, ((Math.hypot(to.x - from.x, to.y - from.y) * (shape ? 1 : width / TABLE.width)) / 120) * 1000);
 		spots.set(id, { ...from, ...to, walking, start: from.x });
 		setTimeout(() => {
 			const spot = spots.get(id);
@@ -121,6 +147,16 @@
 		};
 	});
 
+	const signature = $derived(shape ? [shape.left, shape.right, shape.top, shape.bottom, shape.person, avoid?.x, avoid?.y, avoid?.width, avoid?.height].join() : '');
+
+	$effect(() => {
+		signature;
+		untrack(() => {
+			spots.clear();
+			for (const person of people) place(person.id);
+		});
+	});
+
 	function walk(node: HTMLElement) {
 		if (!ready) return { duration: 0 };
 		const distance = innerWidth - node.getBoundingClientRect().left + 20;
@@ -139,15 +175,16 @@
 	}
 </script>
 
-<div class="crowd" bind:clientWidth={width}>
+<div class="crowd" class:upright={!!shape} bind:clientWidth={width}>
 	{#each people as person (person.id)}
 		{@const spot = spots.get(person.id)!}
 		<button
 			class="person"
 			class:walking={spot.walking}
 			style:--walk="{spot.walking}ms"
-			style:left="{(spot.x / TABLE.width) * 100}%"
-			style:top="{(spot.y / TABLE.height) * 100}%"
+			style:left={shape ? `${spot.x}px` : `${(spot.x / TABLE.width) * 100}%`}
+			style:top={shape ? `${spot.y}px` : `${(spot.y / TABLE.height) * 100}%`}
+			style:width={shape ? `${shape.person}px` : null}
 			style:z-index={Math.round(spot.y)}
 			aria-label="{person.character.handle}'s passport"
 			in:walk
@@ -198,6 +235,15 @@
 		z-index: 1;
 		transform: translate(-50%, -50%);
 		pointer-events: none;
+	}
+
+	.crowd.upright {
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		aspect-ratio: auto;
+		transform: none;
 	}
 
 	.person {
@@ -286,8 +332,13 @@
 		font-size: 12px;
 	}
 
-	.person:hover .tip,
 	.person:focus-visible .tip {
 		visibility: visible;
+	}
+
+	@media (hover: hover) {
+		.person:hover .tip {
+			visibility: visible;
+		}
 	}
 </style>

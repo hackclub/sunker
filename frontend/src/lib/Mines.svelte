@@ -101,6 +101,10 @@
 	const RIM = 0.8;
 	const SKY = [16, 6, 4];
 	const PERSPECTIVE = 1.2;
+	const SHEET = 0.45;
+	const PANEL = 402;
+	const HANG = 100;
+	const FAR = 0.2;
 	const PITCH = 14;
 	const YAW = 20;
 	const FORWARD = 0.8;
@@ -147,8 +151,11 @@
 
 	let innerWidth = $state(window.innerWidth);
 	let innerHeight = $state(window.innerHeight);
-	const unit = $derived(Math.min(innerHeight, innerWidth * 0.75));
-	const perspective = $derived(PERSPECTIVE * innerHeight);
+	const sheet = $derived(innerWidth <= 1024 && innerHeight >= innerWidth);
+	const room = $derived(sheet ? innerHeight * SHEET : innerHeight);
+	const unit = $derived(Math.min(room, innerWidth * 0.75));
+	const perspective = $derived(PERSPECTIVE * room);
+	const centre = $derived([sheet ? innerWidth / 2 : Math.min((innerWidth * 2) / 3, innerWidth - PANEL + HANG - FAR * unit), room * 0.62]);
 
 	let canvases = $state.raw(baked);
 	let textures = $state<string[][]>([]);
@@ -158,6 +165,7 @@
 	let painter = $state.raw<Pit>();
 	let aspects = $state<number[]>([]);
 	const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+	const touch = matchMedia('(hover: none)').matches;
 	let rise = 0;
 
 	$effect(() => {
@@ -297,7 +305,7 @@
 	function matrix(depth: number) {
 		const [width, height, distance] = [innerWidth, innerHeight, perspective];
 		const [near, far] = [unit * 0.01, unit * 20];
-		const [x, y] = [(2 * 2) / 3 - 1, 1 - 2 * 0.62];
+		const [x, y] = [(2 * centre[0]) / width - 1, 1 - (2 * centre[1]) / height];
 		const [a, b] = [(far + near) / (far - near), (-2 * far * near) / (far - near)];
 		const projection = DOMMatrix.fromFloat32Array(new Float32Array([(2 * distance) / width, 0, 0, 0, 0, (-2 * distance) / height, 0, 0, -x, -y, -a, -1, x * distance, y * distance, a * distance + b, distance]));
 		return projection.multiply(new DOMMatrix(drone(depth)));
@@ -362,7 +370,7 @@
 				camera: [0, level * unit, FORWARD * unit],
 				cut,
 				background,
-				calls: calls.map((call) => (call.kind === FACE ? { ...call, layers: glyph(call.ring!, now) } : call.lit && call.ring === hovered ? { ...call, colour: call.lit } : call))
+				calls: calls.map((call) => (call.kind === FACE ? { ...call, layers: glyph(call.ring!, now) } : call.lit && call.ring === glow ? { ...call, colour: call.lit } : call))
 			});
 		});
 		return () => cancelAnimationFrame(frame);
@@ -373,6 +381,7 @@
 	let cardHeight = $state(0);
 
 	const ring = $derived(terraces.find(({ ring }) => String(ring) === params().get('ring'))?.ring);
+	const glow = $derived(hovered ?? (touch ? (ring ?? null) : null));
 
 	let mines = $state<{ contracts: Contract[]; quarry: Contract[]; prizes: Prize[] } | null>(null);
 	let broken = $state(false);
@@ -483,7 +492,7 @@
 
 <svelte:window bind:innerWidth bind:innerHeight onkeydown={onescape} />
 
-<div class="mines" style:--pit={tint(0.45, 0.4)} style:--sky={PALETTE.sky} style:--horizon={PALETTE.horizon} transition:fade={{ duration: duration(false) / 2 }}>
+<div class="mines" style:--pit={tint(0.45, 0.4)} style:--sky={PALETTE.sky} style:--horizon={PALETTE.horizon} style:--x="{centre[0]}px" style:--y="{centre[1]}px" style:--room="{room}px" transition:fade={{ duration: duration(false) / 2 }}>
 	<div class="stage" style:perspective="{perspective}px" role="presentation" onpointermove={hover}>
 		{#if gpu}
 			<canvas
@@ -510,7 +519,7 @@
 					{@const last = i === RING_COUNT - 1}
 					<div
 						class="terrace"
-						class:lit={hovered === ring}
+						class:lit={glow === ring}
 						style:--ledge={terrace.ledge}
 						style:--lit={terrace.lit}
 						style:--dark={terrace.dark}
@@ -666,7 +675,7 @@
 	.stage {
 		position: absolute;
 		inset: 0;
-		perspective-origin: calc(200% / 3) 62%;
+		perspective-origin: var(--x) var(--y);
 	}
 
 	canvas {
@@ -686,8 +695,8 @@
 
 	.world {
 		position: absolute;
-		top: 62%;
-		left: calc(200% / 3);
+		top: var(--y);
+		left: var(--x);
 		transform-style: preserve-3d;
 	}
 
@@ -801,6 +810,16 @@
 		background: var(--island);
 	}
 
+	@media (orientation: portrait) and (max-width: 1024px) {
+		.panel {
+			top: var(--room);
+			right: calc(8px + env(safe-area-inset-right, 0px));
+			bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+			left: calc(8px + env(safe-area-inset-left, 0px));
+			width: auto;
+		}
+	}
+
 	.tabs {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -880,7 +899,7 @@
 
 	.prizes {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(max(140px, calc(50% - 4px)), 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(calc(50% - 4px), 1fr));
 		gap: 8px;
 	}
 
@@ -951,6 +970,24 @@
 		margin-top: 4px;
 	}
 
+	@media (pointer: coarse) {
+		.tabs {
+			height: 44px;
+		}
+
+		.embark,
+		footer .button {
+			min-height: 44px;
+		}
+
+		.item a {
+			display: inline-flex;
+			align-items: center;
+			align-self: flex-start;
+			min-height: 44px;
+		}
+	}
+
 	.claimed {
 		margin: 0;
 	}
@@ -966,7 +1003,7 @@
 
 	.title {
 		position: fixed;
-		top: 16px;
+		top: calc(16px + env(safe-area-inset-top, 0px));
 		left: 50%;
 		display: grid;
 		place-items: center;
@@ -981,7 +1018,14 @@
 		transform: translateX(-50%);
 	}
 
-	@media (max-width: 600px) {
+	@media (orientation: landscape) and (max-width: 1114px) {
+		.title {
+			left: calc(72px + env(safe-area-inset-left, 0px));
+			transform: none;
+		}
+	}
+
+	@media (max-width: 600px), (orientation: landscape) and (max-width: 900px) {
 		.title {
 			height: 48px;
 			padding: 0 14px;
@@ -991,8 +1035,8 @@
 
 	.back {
 		position: fixed;
-		top: 16px;
-		left: 16px;
+		top: calc(16px + env(safe-area-inset-top, 0px));
+		left: calc(16px + env(safe-area-inset-left, 0px));
 		display: grid;
 		place-items: center;
 		width: 48px;
@@ -1017,5 +1061,19 @@
 		stroke-width: 2.5;
 		stroke-linecap: round;
 		stroke-linejoin: round;
+	}
+
+	@media (hover: none) {
+		.mines {
+			touch-action: manipulation;
+		}
+
+		.stage {
+			touch-action: none;
+		}
+
+		.card {
+			display: none;
+		}
 	}
 </style>

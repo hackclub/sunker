@@ -49,6 +49,7 @@
 	let history = $state<Snapshot[]>([]);
 	let restoring = $state<number | null>(null);
 	let confirming = $state<number | null>(null);
+	let armed = 0;
 
 	const locked = $derived(economy?.sheet_sync ?? false);
 
@@ -139,8 +140,10 @@
 		if (!draft || draft.key === null) return;
 		if (!deleting) {
 			deleting = true;
+			armed = Date.now();
 			return;
 		}
+		if (Date.now() - armed < 600) return;
 		saving = true;
 		try {
 			await request('DELETE', `/api/admin/mines/${kind}/${draft.key}`);
@@ -155,8 +158,10 @@
 	async function restore(id: number) {
 		if (confirming !== id) {
 			confirming = id;
+			armed = Date.now();
 			return;
 		}
+		if (Date.now() - armed < 600) return;
 		restoring = id;
 		try {
 			await request('POST', `/api/admin/mines/history/${id}/restore`);
@@ -326,6 +331,7 @@
 
 	header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 12px;
 	}
@@ -345,8 +351,9 @@
 
 	.row {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 12px;
+		gap: 8px 12px;
 	}
 
 	.switch {
@@ -580,5 +587,32 @@
 		border-color: var(--negative);
 		background: var(--negative);
 		color: var(--background);
+	}
+
+	@media (max-width: 480px) {
+		.pair {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.row .grow {
+			flex-basis: auto;
+		}
+	}
+
+	@media (pointer: coarse) {
+		input:not([type='checkbox']),
+		select,
+		.button {
+			min-height: 44px;
+		}
+
+		.switch {
+			min-height: 44px;
+		}
+
+		.history summary {
+			padding: 12px 0;
+			margin: -12px 0;
+		}
 	}
 </style>

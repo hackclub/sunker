@@ -124,7 +124,7 @@
 			<table>
 				<thead>
 					<tr>
-						<th rowspan="2">User</th>
+						<th rowspan="2" class="user">User</th>
 						<th rowspan="2" class="check">All</th>
 						<th colspan={TABS.length} class="group">Tabs</th>
 						<th colspan={ACTIONS.length} class="group">User actions</th>
@@ -137,7 +137,7 @@
 				<tbody>
 					{#each list.superadmins as superadmin (superadmin.hca_id)}
 						<tr>
-							<td>
+							<td class="user">
 								{#if superadmin.user}
 									<a href="/admin/users?user={superadmin.user.id}">{display(superadmin.user)}</a>
 								{:else}
@@ -155,7 +155,7 @@
 					{#key list}
 						{#each list.users as row (row.user.id)}
 							<tr>
-								<td>
+								<td class="user">
 									<a href="/admin/users?user={row.user.id}">{display(row.user)}</a>
 									<span class="muted">{row.user.email ?? ''}</span>
 								</td>
@@ -360,5 +360,53 @@
 		margin: 0;
 		color: var(--negative);
 		font-size: 12px;
+	}
+
+	.user {
+		position: sticky;
+		left: 0;
+		background: var(--island);
+		box-shadow: inset -1px 0 var(--island-border);
+	}
+
+	tbody tr:hover .user {
+		background: var(--hover);
+	}
+
+	@media (max-width: 900px), (max-height: 480px) {
+		.user {
+			min-width: 120px;
+			max-width: 160px;
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
+
+		.user .muted {
+			display: block;
+		}
+
+		li button {
+			flex-wrap: wrap;
+		}
+	}
+
+	@media (pointer: coarse) {
+		button,
+		input[type='search'] {
+			min-height: 44px;
+		}
+
+		input[type='checkbox'] {
+			width: 24px;
+			height: 24px;
+		}
+
+		td {
+			padding-block: 12px;
+		}
+
+		a {
+			padding: 15px 0;
+		}
 	}
 </style>

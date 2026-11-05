@@ -29,4 +29,10 @@
 	:global(button, .button, [role='button']) {
 		user-select: none;
 	}
+
+	@media (pointer: coarse) {
+		:global(input, select, textarea) {
+			font-size: 16px !important;
+		}
+	}
 </style>
