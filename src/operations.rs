@@ -131,7 +131,7 @@ async fn world(pool: &PgPool) -> Result<World, Failure> {
 
 impl World {
     fn selectable(&self, hex: Hex) -> bool {
-        self.tiles.get(&hex).is_some_and(|tile| !tile.has("mine")) && (!self.occupied.contains_key(&hex) || self.rings.get(&hex) == Some(&0))
+        self.tiles.contains_key(&hex) && (!self.occupied.contains_key(&hex) || self.rings.get(&hex) == Some(&0))
     }
 
     fn route(&self, to: Hex, sea: bool) -> Option<Route> {
@@ -159,7 +159,7 @@ impl World {
                 let Some(tile) = self.tiles.get(&next) else {
                     continue;
                 };
-                if tile.has("mine") || (tile.water() && !sea) || (next != to && self.occupied.contains_key(&next)) {
+                if (tile.water() && !sea) || (next != to && self.occupied.contains_key(&next)) {
                     continue;
                 }
                 let (chiprock, shale) = if tile.water() { (0, 1) } else if tile.road() { (2, 0) } else { (4, 0) };

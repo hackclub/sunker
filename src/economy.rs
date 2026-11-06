@@ -1,5 +1,5 @@
 use crate::admin::{self, Permission};
-use crate::{history, mines, prize_images};
+use crate::{contracts, history, prize_images};
 use actix_web::{HttpRequest, HttpResponse, get, post, put, web};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -218,7 +218,7 @@ async fn apply(pool: &PgPool, sheet: &Sheet, admin: Option<i32>) -> sqlx::Result
     let mut slugs = Vec::new();
     for (ring, name, description, criteria) in &sheet.contracts {
         let found: Option<String> = sqlx::query_scalar(
-            "SELECT slug FROM contract WHERE ring = $1 AND lower(name) = lower($2) AND slug <> 'general' ORDER BY deleted_at IS NOT NULL LIMIT 1",
+            "SELECT slug FROM contract WHERE ring = $1 AND lower(name) = lower($2) ORDER BY deleted_at IS NOT NULL LIMIT 1",
         )
         .bind(ring)
         .bind(name)
@@ -236,7 +236,7 @@ async fn apply(pool: &PgPool, sheet: &Sheet, admin: Option<i32>) -> sqlx::Result
                 slug
             }
             None => {
-                let slug = mines::fresh_slug(&mut tx, name).await?;
+                let slug = contracts::fresh_slug(&mut tx, name).await?;
                 sqlx::query("INSERT INTO contract (slug, ring, name, description, criteria) VALUES ($1, $2, $3, $4, $5)")
                     .bind(&slug)
                     .bind(ring)
@@ -250,7 +250,7 @@ async fn apply(pool: &PgPool, sheet: &Sheet, admin: Option<i32>) -> sqlx::Result
         };
         slugs.push(slug);
     }
-    sqlx::query("UPDATE contract SET deleted_at = now() WHERE deleted_at IS NULL AND slug <> 'general' AND NOT (slug = ANY($1))")
+    sqlx::query("UPDATE contract SET deleted_at = now() WHERE deleted_at IS NULL AND NOT (slug = ANY($1))")
         .bind(&slugs)
         .execute(&mut *tx)
         .await?;
@@ -305,7 +305,7 @@ async fn state(pool: &PgPool) -> HttpResponse {
 
 async fn record(pool: &PgPool, admin: i32, action: &str, summary: String) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
-    mines::log(&mut tx, admin, action, summary).await?;
+    contracts::log(&mut tx, admin, action, summary).await?;
     tx.commit().await
 }
 

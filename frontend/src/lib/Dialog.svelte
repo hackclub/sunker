@@ -4,8 +4,9 @@
 	let {
 		open = $bindable(false),
 		title,
+		wide = false,
 		children
-	}: { open?: boolean; title: string; children?: Snippet } = $props();
+	}: { open?: boolean; title: string; wide?: boolean; children?: Snippet } = $props();
 
 	let dialog: HTMLDialogElement;
 
@@ -15,7 +16,7 @@
 	});
 </script>
 
-<dialog bind:this={dialog} onclose={() => (open = false)}>
+<dialog class:wide bind:this={dialog} onclose={() => (open = false)}>
 	<header>
 		<h2>{title}</h2>
 		<button aria-label="Close" onclick={() => (open = false)}>
@@ -38,6 +39,42 @@
 		background: var(--island);
 		color: var(--text);
 		box-shadow: 0 16px 48px var(--shadow);
+	}
+
+	dialog.wide {
+		width: min(960px, calc(100vw - 32px));
+		height: calc(100dvh - 64px);
+	}
+
+	dialog.wide[open] {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.wide .content {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+		overscroll-behavior: contain;
+	}
+
+	@media (max-width: 600px), (max-height: 480px) {
+		dialog.wide {
+			width: 100vw;
+			max-width: none;
+			height: 100dvh;
+			max-height: none;
+			border: none;
+			border-radius: 0;
+		}
+
+		.wide header {
+			padding-top: calc(12px + env(safe-area-inset-top, 0px));
+		}
+
+		.wide .content {
+			padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+		}
 	}
 
 	dialog::backdrop {

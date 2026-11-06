@@ -3,14 +3,13 @@
 	import { PALETTE } from '#lib/colors.js';
 	import { image, rendering, smooth } from '#lib/styles.svelte.js';
 	import WorldMap from '#lib/WorldMap.svelte';
-	import Mines, { bake } from '#lib/Mines.svelte';
 	import { params, update } from '#lib/url.svelte.js';
 	import { page } from '$app/state';
-	import { place, type PlacedTile } from '#lib/map.js';
+	import { place } from '#lib/map.js';
 	import { BAR, FLIGHT, PHONE, crest, footprint, halo, inside, island, reveal, stage, transform, unseat } from '#lib/view.js';
 	import Projects from '#lib/hq/Projects.svelte';
 	import Propaganda from '#lib/hq/Propaganda.svelte';
-	import Orders from '#lib/hq/Orders.svelte';
+	import Prizes from '#lib/hq/Prizes.svelte';
 	import Chat from '#lib/hq/Chat.svelte';
 	import Operations from '#lib/hq/Operations.svelte';
 	import { planner } from '#lib/hq/planner.svelte.js';
@@ -37,7 +36,7 @@
 		left: [
 			{ label: 'Projects', icon: 'projects-icon', component: Projects, disabled: false, dot: false },
 			{ label: 'Propaganda', icon: 'propaganda-icon', component: Propaganda, disabled: false, dot: false },
-			{ label: 'Orders', icon: 'orders-icon', component: Orders, disabled: false, dot: false }
+			{ label: 'Prizes', icon: 'orders-icon', component: Prizes, disabled: false, dot: false }
 		],
 		right: [
 			{ label: 'Chat', icon: 'chat-icon', component: Chat, disabled: false, dot: false },
@@ -65,13 +64,12 @@
 		if (innerWidth && innerWidth < SPLIT && open.left && open.right) update({ [chatting ? 'left' : 'right']: null }, { replace: true });
 	});
 
-	type Stop = { text?: string; area?: 'map' | 'mines'; spots: string[] };
+	type Stop = { text?: string; area?: 'map'; spots: string[] };
 
 	const STOPS: Stop[] = [
-		{ text: TOUR[0], spots: ['Help'] },
-		{ text: TOUR[1], area: 'mines', spots: ['Orders'] },
-		{ text: TOUR[2], area: 'map', spots: ['Operations'] },
-		{ text: TOUR[3], spots: ['Chat'] },
+		{ text: TOUR[0], spots: ['Projects', 'Prizes'] },
+		{ text: TOUR[1], area: 'map', spots: ['Operations'] },
+		{ text: TOUR[2], spots: ['Chat'] },
 		{ text: GUILDS, spots: [] },
 		{ spots: [] },
 		{ text: FAREWELL, spots: [] }
@@ -150,7 +148,7 @@
 			event.preventDefault();
 			return onward();
 		}
-		if (event.key !== 'Escape' || mining) return;
+		if (event.key !== 'Escape' || (event.target instanceof Element && event.target.closest('dialog'))) return;
 		if (wanted) close();
 		else if (open.left || open.right) update({ left: null, right: null });
 	}
@@ -255,21 +253,18 @@
 	const pose = $derived(transform(layout.pose));
 	const outline = $derived(island(tiles, innerWidth, innerHeight));
 	const clip = $derived(footprint(outline));
-	const border = $derived(halo(outline, tiles, layout.pose, innerWidth, innerHeight));
-	const mine = (tile: PlacedTile) => tile.tile.variants.includes('mine');
-	const shaft = $derived(outline.filter((_, i) => mine(tiles[i])));
-	const seam = $derived(halo(outline, tiles, layout.pose, innerWidth, innerHeight, mine));
+	const border = $derived(halo(outline, layout.pose, innerWidth, innerHeight));
 	const top = $derived(crest(outline, layout.pose, innerWidth, innerHeight));
-	let hovering = $state<'map' | 'mines' | null>(null);
+	let hovering = $state<'map' | null>(null);
 	const shown = $derived(current ? (current.area ?? null) : hovering);
 
 	function over(event: PointerEvent | MouseEvent) {
 		const point = unseat(layout.pose, innerWidth, innerHeight)([event.clientX, event.clientY]);
-		return inside(shaft, point) ? 'mines' : inside(outline, point) ? 'map' : null;
+		return inside(outline, point) ? 'map' : null;
 	}
 
 	function onpointermove(event: PointerEvent) {
-		hovering = !docked || mining || (event.target instanceof Element && event.target.closest('.crowd')) ? null : over(event);
+		hovering = !docked || (event.target instanceof Element && event.target.closest('.crowd')) ? null : over(event);
 	}
 
 	function release(event: PointerEvent) {
@@ -282,7 +277,6 @@
 	});
 
 	const wanted = $derived(params().has('map'));
-	const mining = $derived(params().has('mines'));
 	let settled = page.url.searchParams.has('map');
 	let docked = $state(!settled);
 	let flight: HTMLElement;
@@ -301,29 +295,14 @@
 
 	const touch = new MediaQuery('(hover: none)');
 
-	function enter(target: 'map' | 'mines') {
-		if (target === 'map') update({ map: true }, { state: { map: true } });
-		else dig();
+	function enter() {
+		update({ map: true }, { state: { map: true } });
 	}
 
 	function onclick(event: MouseEvent) {
 		event.preventDefault();
-		if (wanted || mining || current) return;
-		const target = event.detail === 0 ? 'map' : over(event);
-		if (target) enter(target);
-	}
-
-	function dig() {
-		update({ mines: true }, { state: { ...page.state, mines: true } });
-	}
-
-	function leave() {
-		if (page.state.mines) history.back();
-		else update({ mines: null, ring: null }, { replace: true, state: { map: page.state.map } });
-	}
-
-	function visit() {
-		update({ mines: null, ring: null, left: 'projects' }, { replace: true, state: { map: page.state.map } });
+		if (wanted || current) return;
+		if (event.detail === 0 || over(event)) enter();
 	}
 
 	function close() {
@@ -332,7 +311,7 @@
 	}
 
 	$effect(() => {
-		if (current && (wanted || mining)) update({ map: null, operation: null, mines: null, ring: null }, { replace: true, state: {} });
+		if (current && wanted) update({ map: null, operation: null }, { replace: true, state: {} });
 	});
 
 	$effect(() => {
@@ -367,11 +346,6 @@
 		if (wanted === settled) return;
 		settled = wanted;
 		fly(wanted);
-	});
-
-	$effect(() => {
-		const id = (window.requestIdleCallback ?? setTimeout)(() => bake().catch(() => {}));
-		return () => (window.cancelIdleCallback ?? clearTimeout)(id);
 	});
 
 	$effect(() => {
@@ -516,7 +490,7 @@
 <Konami enabled={me.current?.superadmin ?? false} />
 
 <svelte:head>
-	<title>{mining ? 'Mines' : wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
+	<title>{wanted ? 'Map' : 'HQ'} - Hack Club Sunker</title>
 </svelte:head>
 
 <div
@@ -561,38 +535,14 @@
 		<img class="table" src={image('table')} alt="" style:--rendering={rendering('table')} style:--px={natural ? `calc(100vw / 2 / ${natural})` : null} bind:naturalWidth={natural} />
 	{/if}
 	{#if shown && docked}
-		{#if shown === 'mines'}
-			<svg class="outline seam" class:spotlit={!!current} viewBox="0 0 {innerWidth} {innerHeight}">
-				<mask id="seam">
-					<rect width={innerWidth} height={innerHeight} fill="white" />
-					<path d={seam} fill="black" stroke="none" />
-				</mask>
-				<path d={seam} stroke-width={innerWidth / 256} mask="url(#seam)" />
-			</svg>
-		{:else}
-			<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
-		{/if}
-		<span class="label" class:spotlit={!!current} style:left="{top[0]}px" style:top="{top[1]}px">{shown === 'mines' ? 'Mines' : 'Map'}</span>
+		<svg class="outline" viewBox="0 0 {innerWidth} {innerHeight}"><path d={border} stroke-width={innerWidth / 256} /></svg>
+		<span class="label" class:spotlit={!!current} style:left="{top[0]}px" style:top="{top[1]}px">Map</span>
 	{/if}
-	<a class="enter" href="?map" aria-label="Open map" inert={!!current} class:hovering {onclick} onfocus={() => (hovering = !docked || mining ? null : 'map')} onblur={() => (hovering = null)}></a>
-	<a
-		class="dig"
-		href="?mines"
-		aria-label="Open mines"
-		inert={!!current}
-		onclick={(event) => {
-			event.preventDefault();
-			if (!wanted && !mining && !current) dig();
-		}}
-		onfocus={() => (hovering = !docked || mining ? null : 'mines')}
-		onblur={() => (hovering = null)}
-	></a>
+	<a class="enter" href="?map" aria-label="Open map" inert={!!current} class:hovering {onclick} onfocus={() => (hovering = !docked ? null : 'map')} onblur={() => (hovering = null)}></a>
 
-	{#if touch.current && docked && !wanted && !mining && !current}
+	{#if touch.current && docked && !wanted && !current}
 		<div class="chips">
-			{#each ['map', 'mines'] as const as target}
-				<button class="chip" onpointerdown={() => (hovering = target)} onclick={() => enter(target)}>{target === 'map' ? 'Map' : 'Mines'}</button>
-			{/each}
+			<button class="chip" onpointerdown={() => (hovering = 'map')} onclick={enter}>Map</button>
 		</div>
 	{/if}
 
@@ -639,13 +589,11 @@
 			map={data.map}
 			territory={data.territory}
 			table={!wanted}
-			arrows={!mining}
 			covered={hidden}
 			cleared={ceiling}
 			selectable={planner.selectable}
 			selected={planner.selected}
 			route={planner.path}
-			onmine={dig}
 			onpick={(hex) => planner.pick?.(hex)}
 		/>
 		{#if wanted}
@@ -655,16 +603,12 @@
 		{/if}
 	</div>
 
-	{#if mining}
-		<Mines onback={leave} onproject={visit} />
-	{/if}
-
 	{#if current}
 		<button class="dim" aria-label="Continue" onclick={onward}>
 			<svg viewBox="0 0 {innerWidth} {innerHeight}" aria-hidden="true">
 				<mask id="spotlight">
 					<rect width={innerWidth} height={innerHeight} fill="white" />
-					{#if current.area}<path d={current.area === 'mines' ? seam : border} fill="black" />{/if}
+					{#if current.area}<path d={border} fill="black" />{/if}
 				</mask>
 				<rect class="shade" width={innerWidth} height={innerHeight} mask="url(#spotlight)" />
 			</svg>
@@ -950,11 +894,6 @@
 		stroke-linejoin: round;
 	}
 
-	.seam {
-		z-index: 11;
-		fill: none;
-	}
-
 	.flight {
 		position: fixed;
 		inset: 0;
@@ -1007,14 +946,6 @@
 
 	.enter.hovering {
 		cursor: pointer;
-	}
-
-	.dig {
-		position: fixed;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip-path: inset(50%);
 	}
 
 	.chips {
@@ -1337,8 +1268,8 @@
 		transform: none;
 		border-style: solid;
 		border-color: transparent;
-		border-width: calc(56 * var(--px)) calc(130 * var(--px)) calc(75 * var(--px)) calc(130 * var(--px));
-		border-image-slice: 56 130 75 130 fill;
+		border-width: calc(56 * var(--px)) calc(250 * var(--px)) calc(110 * var(--px)) calc(210 * var(--px));
+		border-image-slice: 56 250 110 210 fill;
 		border-image-width: 1;
 		border-image-repeat: stretch;
 		image-rendering: var(--rendering);

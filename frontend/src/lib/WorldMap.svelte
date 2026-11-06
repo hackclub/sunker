@@ -13,25 +13,21 @@
 		map,
 		territory = [],
 		table = false,
-		arrows = true,
 		covered = 0,
 		cleared = 0,
 		selectable = null,
 		selected = null,
 		route = null,
-		onmine,
 		onpick
 	}: {
 		map: HexMap;
 		territory?: Territory[];
 		table?: boolean;
-		arrows?: boolean;
 		covered?: number;
 		cleared?: number;
 		selectable?: [number, number][] | null;
 		selected?: [number, number] | null;
 		route?: [number, number][] | null;
-		onmine?: () => void;
 		onpick?: (hex: [number, number]) => void;
 	} = $props();
 
@@ -266,32 +262,14 @@
 		}
 		return found;
 	};
-	const groups = $derived.by(() => {
-		const found = new Map<PlacedTile, Set<PlacedTile>>();
-		for (const tile of tiles) {
-			if (!tile.tile.variants.includes('mine') || found.has(tile)) continue;
-			const group = new Set([tile]);
-			for (const { row, col } of group) {
-				for (const [r, c] of neighbours(row, col)) {
-					const other = placed.get(`${r},${c}`);
-					if (other?.tile.variants.includes('mine')) group.add(other);
-				}
-			}
-			for (const member of group) found.set(member, group);
-		}
-		return found;
-	});
-
 	function edges(hex: PlacedTile) {
 		const { tile, row, col } = hex;
-		const mine = tile.variants.includes('mine');
 		const mountain = tile.variants.includes('mountain');
 		return neighbours(row, col).reduce((bits, [r, c], i) => {
 			const other = placed.get(`${r},${c}`);
 			const step = other ? tile.height - other.tile.height : Infinity;
-			const across = mine !== Boolean(other?.tile.variants.includes('mine'));
 			const front = occupied(hex) !== occupied(other);
-			const kind = step > LEVEL || (mine && across) ? CONTOUR : Math.abs(step) > LEVEL ? 0 : mine || across || front ? HIDDEN : THIN;
+			const kind = step > LEVEL ? CONTOUR : Math.abs(step) > LEVEL ? 0 : front ? HIDDEN : THIN;
 			return bits | ((mountain ? kind & 1 && HIDDEN : kind) << (2 * i));
 		}, 0);
 	}
@@ -302,7 +280,6 @@
 		const arms = (match: (other: PlacedTile) => boolean, shift: number) => around.reduce((bits, other, i) => (other && match(other) ? bits | (1 << (shift + i)) : bits), 0);
 		const road = roadOf(tile);
 		let bits = 0;
-		if (tile.variants.includes('mine')) bits |= arms((other) => other.tile.variants.includes('mine'), 0);
 		if (tile.variants.includes('beach')) bits |= arms((other) => other.tile.base !== tile.base, 6);
 		if (road === 'highway') bits |= arms((other) => roadOf(other.tile) === 'highway', 12);
 		if (occupied(hex)) bits |= around.reduce((mask, other, i) => (occupied(other) ? mask : mask | (1 << (18 + i))), 0);
@@ -655,8 +632,6 @@
 		if (selectable) {
 			const target = touched ? snap(event.clientX, event.clientY) : tile;
 			if (target && pickable(target)) onpick?.([target.row, target.col]);
-		} else if (tile?.tile.variants.includes('mine')) {
-			onmine?.();
 		} else if (touched) {
 			pointer = { x: event.clientX, y: event.clientY };
 			hovered = tile && tile !== hovered ? tile : null;
@@ -682,7 +657,7 @@
 	});
 
 	$effect(() => {
-		if (table || !arrows) return;
+		if (table) return;
 		const held = new Set<string>();
 		const tapped = new Set<string>();
 		let frame = 0;
@@ -858,7 +833,7 @@
 				const area = region ? members.get(region) : undefined;
 				hexes.forEach((hex, i) => {
 					if (!hex.placed) return;
-					const focus = area ? area.has(`${hex.placed.row},${hex.placed.col}`) : hovered === hex.placed || Boolean(hovered && groups.get(hovered)?.has(hex.placed));
+					const focus = area ? area.has(`${hex.placed.row},${hex.placed.col}`) : hovered === hex.placed;
 					const key = `${hex.placed.row},${hex.placed.col}`;
 					data[i * STRIDE + 13] = (occupied(hex.placed) ? (focus ? -2 : -1) : focus ? 1 : 0) + (key === chosen ? 2 : marks.has(key) ? 1 : 0) * MARK;
 				});
@@ -876,7 +851,7 @@
 <div
 	class="map"
 	class:table
-	class:mine={selectable ? pickable(hovered) : hovered?.tile.variants.includes('mine')}
+	class:pointer={selectable && pickable(hovered)}
 	class:grabbing
 	role="presentation"
 	bind:this={element}
@@ -1031,7 +1006,7 @@
 		stroke-linecap: round;
 	}
 
-	.mine {
+	.pointer {
 		cursor: pointer;
 	}
 

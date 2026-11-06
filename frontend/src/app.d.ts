@@ -7,8 +7,6 @@ declare global {
 		// interface PageData {}
 		interface PageState {
 			map?: boolean;
-			mines?: boolean;
-			ring?: boolean;
 		}
 		// interface Platform {}
 	}

@@ -4,12 +4,12 @@ mod admin_users;
 mod analytics;
 mod auth;
 mod chats;
+mod contracts;
 mod database;
 mod economy;
 mod history;
 mod http;
 mod joel;
-mod mines;
 mod moderation;
 mod onboarding;
 mod operations;
@@ -72,7 +72,6 @@ async fn main() -> std::io::Result<()> {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL not set");
     let pool = web::Data::new(database::init(&url).await.map_err(std::io::Error::other)?);
     styling::seed(&pool).await.map_err(std::io::Error::other)?;
-    mines::seed(&pool).await.map_err(std::io::Error::other)?;
     prize_images::refresh(&pool);
 
     let syncer = pool.clone();
@@ -128,15 +127,15 @@ async fn main() -> std::io::Result<()> {
             .service(health)
             .service(map)
             .service(territory::list)
-            .service(mines::list)
+            .service(contracts::list)
             .service((
-                mines::overview,
-                mines::create_contract,
-                mines::save_contract,
-                mines::remove_contract,
-                mines::create_prize,
-                mines::save_prize,
-                mines::remove_prize,
+                contracts::overview,
+                contracts::create_contract,
+                contracts::save_contract,
+                contracts::remove_contract,
+                contracts::create_prize,
+                contracts::save_prize,
+                contracts::remove_prize,
             ))
             .service((economy::overview, economy::toggle, economy::refresh))
             .service((history::list, history::restore, prize_images::serve))
@@ -161,6 +160,7 @@ async fn main() -> std::io::Result<()> {
                 projects::hackatime_list,
                 projects::link,
                 projects::linked,
+                projects::unlink,
             ))
             .service((
                 operations::list,
@@ -174,7 +174,7 @@ async fn main() -> std::io::Result<()> {
             ))
             .service((auth::start, auth::callback, auth::session, auth::logout))
             .service((onboarding::me, onboarding::save_character, onboarding::advance, onboarding::reset))
-            .service((orders::list, orders::overview, orders::update))
+            .service((orders::list, orders::claim, orders::overview, orders::update))
             .service((propaganda::overview, propaganda::submit))
             .service((propaganda::queue, propaganda::repoll, propaganda::verify))
             .service((styling::manifest, styling::image, styling::events))

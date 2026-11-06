@@ -5,8 +5,7 @@ export const INTRO = [
 ];
 
 export const TOUR = [
-	"Welcome to Headquarters! I'm going to guide you super quick through how you'll ship projects to contribute in the fight against the Dyconids. You can learn more with the help button in the bottom left corner",
-	"First, you start a contract at the Mines. After you ship the project, you'll get resources for the war effort as well as a real prize of your choice shipped right to your door!",
+	'Welcome to Headquarters! Start a project with the + in Projects. Ship it to earn resources for the war effort, plus a real prize from Prizes shipped to your door!',
 	'Use those resources to start Operations in the map to kick the Dyconids out',
 	'However, Operations can be expensive. Collaborate with others just like yourself by coordinating in the Chat. Go ahead and say hi!'
 ];

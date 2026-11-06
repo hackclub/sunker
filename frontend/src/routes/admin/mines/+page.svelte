@@ -4,7 +4,7 @@
 	import Segmented from '#lib/admin/Segmented.svelte';
 	import { RESOURCE_NAMES } from '#lib/admin/analytics.js';
 	import { request } from '#lib/joel/joel.js';
-	import type { StockedPrize, Contract } from '#lib/mines.js';
+	import type { StockedPrize, Contract } from '#lib/contracts.svelte.js';
 	import { RING_COUNT } from '#lib/rings.svelte.js';
 
 	type Kind = 'contracts' | 'prizes';

@@ -85,14 +85,10 @@ export const COLOURS: Record<string, Record<string, string>> = {
 		'joel-houses': '#b8aca4',
 		'joel-buildings': '#8e8ca0',
 		'joel-mountain': '#6e6a78',
-		'joel-mine': '#4a3828',
 		'joel-highway': '#484656',
 		'joel-cactus': '#4a8a3a',
 		'joel-label': '#ffffff',
 		'joel-hover': '#ffffff'
-	},
-	Mines: {
-		'mines-depth': '#2a2b2d'
 	},
 	Passport: {
 		'passport-cover': '#24344f',

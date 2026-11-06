@@ -113,7 +113,7 @@ async fn detail(pool: &PgPool, id: i32) -> sqlx::Result<Option<Value>> {
              'ledger_by', (SELECT coalesce(jsonb_agg(to_jsonb(l) - 'admin_id' || jsonb_build_object('user', (SELECT {person} FROM \"user\" x WHERE x.id = l.user_id)) ORDER BY l.created_at DESC), '[]')
                            FROM resource_ledger l WHERE l.admin_id = u.id),
              'projects', (SELECT coalesce(jsonb_agg(to_jsonb(p) - 'user_id' || jsonb_build_object('contract_name', e.name, 'ring', e.ring) ORDER BY p.created_at DESC), '[]')
-                          FROM project p JOIN contract e ON e.slug = p.contract_slug WHERE p.user_id = u.id),
+                          FROM project p LEFT JOIN contract e ON e.slug = p.contract_slug WHERE p.user_id = u.id),
              'ships', (SELECT coalesce(jsonb_agg(to_jsonb(s) || jsonb_build_object('project_name', p.name, 'reviewer', (SELECT {person} FROM \"user\" x WHERE x.id = s.reviewer_id)) ORDER BY s.created_at DESC), '[]')
                        FROM ship s JOIN project p ON p.id = s.project_id WHERE p.user_id = u.id),
              'reviewed_ships', (SELECT coalesce(jsonb_agg(to_jsonb(s) || jsonb_build_object('project_name', p.name, 'owner', (SELECT {person} FROM \"user\" x WHERE x.id = p.user_id)) ORDER BY s.decided_at DESC NULLS LAST), '[]')

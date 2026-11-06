@@ -449,7 +449,7 @@ pub async fn declare(req: HttpRequest, body: web::Json<Value>, pool: web::Data<P
         (Ok(width), Ok(height)) => (width, height),
         (Err(response), _) | (_, Err(response)) => return response,
     };
-    let base = crate::mines::slug(name);
+    let base = crate::contracts::slug(name);
     let outcome: Outcome = async {
         let mut tx = pool.begin().await?;
         let joiner = if base.ends_with(|c: char| c.is_ascii_digit()) { "-" } else { "" };

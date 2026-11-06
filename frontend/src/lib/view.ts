@@ -21,7 +21,7 @@ const ROW = 76;
 const SIDE = 0.64;
 const SHARE = 400;
 const GUIDE = 0.62;
-const ART = { left: 70, top: 44, right: 74 };
+const ART = { left: 117, top: 28, right: 156 };
 
 export type Plane = { width: number; height: number; scale: number; x: number; y: number };
 export type Pose = { x: number; y: number; sx: number; sy: number };
@@ -148,7 +148,7 @@ export function stage(tiles: PlacedTile[], width: number, height: number, top: n
 	const table = { x: left, y: floor - long, width: length, height: long };
 	const wall = Math.round(table.y - 12);
 	const size = Math.round(Math.max(72, Math.min(width * 0.22, 120)));
-	const area = { x: left + 35 * unit, y: table.y + 22 * unit, width: length - 70 * unit, height: long - 100 * unit };
+	const area = { x: left + 55 * unit, y: table.y + 30 * unit, width: length - 125 * unit, height: long - 140 * unit };
 	return {
 		pose: level(tiles, width, height, area),
 		wall,
@@ -169,10 +169,9 @@ export function unseat(pose: Pose, width: number, height: number) {
 	return ([x, y]: Point): Point => [width / 2 + (x - width / 2 - pose.x) / pose.sx, height / 2 + (y - height / 2 - pose.y) / pose.sy];
 }
 
-export function halo(outline: Point[][], tiles: PlacedTile[], pose: Pose, width: number, height: number, keep: (tile: PlacedTile) => boolean = () => true) {
+export function halo(outline: Point[][], pose: Pose, width: number, height: number) {
 	const point = seat(pose, width, height);
 	return outline
-		.filter((_, i) => keep(tiles[i]))
 		.map((polygon) => 'M' + polygon.map((p) => point(p).join(' ')).join('L') + 'Z')
 		.join('');
 }

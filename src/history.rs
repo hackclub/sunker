@@ -1,5 +1,5 @@
 use crate::admin::{self, Permission};
-use crate::{mines, prize_images};
+use crate::{contracts, prize_images};
 use actix_web::{HttpRequest, HttpResponse, get, post, web};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -111,7 +111,7 @@ pub async fn restore(req: HttpRequest, id: web::Path<i32>, pool: web::Data<PgPoo
         .bind(&contracts)
         .execute(&mut *tx)
         .await?;
-        mines::log(&mut tx, admin.id, "mines_restore", format!("Restored the mines to snapshot #{id} and turned off sheet sync")).await?;
+        contracts::log(&mut tx, admin.id, "mines_restore", format!("Restored the mines to snapshot #{id} and turned off sheet sync")).await?;
         tx.commit().await?;
         prize_images::refresh(&pool);
         Ok(HttpResponse::NoContent().finish())

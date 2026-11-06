@@ -31,7 +31,7 @@ export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.fi
 const TREE = sprite('tree1');
 const OUTPOST = sprite('outpost');
 
-const VARIANTS = ['highway', 'street', 'mine', 'beach', 'farmland', 'sunker', 'origin'];
+const VARIANTS = ['highway', 'street', 'beach', 'farmland', 'sunker', 'origin'];
 const flag = (variant: string) => 1 << VARIANTS.indexOf(variant);
 const marked = (value: number) => Math.floor((value + 2.5) / MARK);
 const hovering = (value: number) => value > 0 || value < -1.5;
@@ -200,11 +200,6 @@ ${SURFACES()}
 float hexagon(vec2 p) {
 	return max(abs(p.x), max(abs(dot(p, vec2(0.5, 0.8660254))), abs(dot(p, vec2(0.5, -0.8660254)))));
 }
-const vec2 HEX[6] = vec2[6](vec2(0.0, -1.0), vec2(0.8660254, -0.5), vec2(0.8660254, 0.5), vec2(0.0, 1.0), vec2(-0.8660254, 0.5), vec2(-0.8660254, -0.5));
-float segment(vec2 p, vec2 a, vec2 b) {
-	vec2 ab = b - a;
-	return length(p - a - ab * clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
-}
 vec2 lane(vec2 p, vec2 a, vec2 b) {
 	vec2 ab = b - a;
 	float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
@@ -227,45 +222,6 @@ bool inside(vec2 p, vec2 a, vec2 b, vec2 c) {
 bool dropped(vec2 nodes[7], int hubs, int a, int b, int c) {
 	int count = ((hubs >> a) & 1) + ((hubs >> b) & 1) + ((hubs >> c) & 1);
 	return count == 1 ? ((hubs >> c) & 1) == 1 : longest(nodes[a], nodes[b], nodes[c]);
-}
-float pit(vec2 p, int bits) {
-	float d = 1e9;
-	int nearest = -1;
-	float best = dot(p, p);
-	for (int i = 0; i < 6; i++) {
-		vec2 center = NORMALS[i] * 1.7320508;
-		if (dot(p - center, p - center) < best) {
-			best = dot(p - center, p - center);
-			nearest = i;
-		}
-		vec2 a = HEX[i];
-		vec2 b = HEX[(i + 1) % 6];
-		if (((bits >> i) & 1) == 0) {
-			d = min(d, segment(p, a, b));
-			continue;
-		}
-		int after = (i + 1) % 6;
-		int before = (i + 5) % 6;
-		if (((bits >> after) & 1) == 0) d = min(d, segment(p, b, center + NORMALS[after] * 1.7320508 - b));
-		if (((bits >> before) & 1) == 0) d = min(d, segment(p, a, center + NORMALS[before] * 1.7320508 - a));
-	}
-	return nearest < 0 || ((bits >> nearest) & 1) == 1 ? d : -d;
-}
-vec3 mine(vec2 p, float y, vec3 rgb, int bits) {
-	float aa = length(fwidth(p));
-	vec3 result = rgb;
-	vec2 o = vec2(0.0);
-	float shade = 1.0;
-	for (int i = 0; i < 4; i++) {
-		float depth = 0.116 + float(i) * 0.17;
-		float rim = smoothstep(-aa, aa, pit(p - o, bits) - depth);
-		vec3 wall = rgb * shade * 0.62 * (1.0 + 0.1 * sin(y * 270.0));
-		o.y += 0.07;
-		shade *= 0.86;
-		float ground = smoothstep(-aa, aa, pit(p - o, bits) - depth);
-		result = mix(result, mix(wall, rgb * shade, ground), rim);
-	}
-	return result;
 }
 vec3 farmland(vec2 w) {
 	vec2 cell = floor(w / 1.4);
@@ -353,7 +309,6 @@ void main() {
 		vec3 base = (variants & FARMLAND) != 0 ? farmland(v_world) : surface(float(packed % 1000), v_world, v_local, v_top);
 		if (v_highlight < 0.0) base = mix(base, HOSTILE, 0.3);
 		int edges = int(v_edges);
-		if ((variants & MINE) != 0) base = mine(v_local, v_world.y, base, int(v_arms) & 63);
 		if ((variants & BEACH) != 0) {
 			vec3 sand = surface(${NAMES.indexOf('sand') + 1}.0, v_world, v_local, v_top);
 			float shore = 0.0;
@@ -1030,57 +985,6 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 		stroke(true, 0.05, css(MAP.paint));
 	};
 
-	const inset = (cx: number, cy: number, open: boolean[], depth: number) => {
-		let points = CORNERS.map(([x, y]) => [x, y]);
-		open.forEach((cut, k) => {
-			if (!cut) return;
-			const [nx, ny] = [(CORNERS[k][0] + CORNERS[(k + 1) % 6][0]) / 1.7320508, (CORNERS[k][1] + CORNERS[(k + 1) % 6][1]) / 1.7320508];
-			const side = ([x, y]: number[]) => x * nx + y * ny - 0.8660254 + depth;
-			points = points.flatMap((p, i) => {
-				const q = points[(i + 1) % points.length];
-				const [a, b] = [side(p), side(q)];
-				const kept = a <= 0 ? [p] : [];
-				if (a * b < 0) kept.push([p[0] + ((q[0] - p[0]) * a) / (a - b), p[1] + ((q[1] - p[1]) * a) / (a - b)]);
-				return kept;
-			});
-		});
-		return points.map(([x, y]) => [cx + x, cy + y]);
-	};
-
-	const mine = (cx: number, cy: number, rgb: number[], bits: number) => {
-		const mined = (k: number) => ((bits >> ((k + 6) % 6)) & 1) === 1;
-		const trace = (depth: number, offset: number) => {
-			const regions = [inset(cx, cy + offset, CORNERS.map((_, k) => !mined(k)), depth)];
-			CORNERS.forEach(([x, y], i) => {
-				if (!mined(i)) return;
-				const open = CORNERS.map((_, k) => (k === (i + 2) % 6 && !mined(i + 1)) || (k === (i + 4) % 6 && !mined(i - 1)));
-				regions.push(inset(cx + x + CORNERS[(i + 1) % 6][0], cy + offset + y + CORNERS[(i + 1) % 6][1], open, depth));
-			});
-			context.beginPath();
-			for (const region of regions) {
-				region.forEach(([x, y], k) => (k ? context.lineTo(...project(x, y)) : context.moveTo(...project(x, y))));
-				context.closePath();
-			}
-		};
-		context.save();
-		path(CORNERS.map(([x, y]) => [cx + x, cy + y]));
-		context.clip();
-		let [offset, light] = [0, 1];
-		for (let i = 0; i < 4; i++) {
-			const depth = 0.116 + i * 0.17;
-			trace(depth, offset);
-			context.fillStyle = shade(rgb, light * 0.62);
-			context.fill();
-			context.clip();
-			offset += 0.07;
-			light *= 0.86;
-			trace(depth, offset);
-			context.fillStyle = shade(rgb, light);
-			context.fill();
-		}
-		context.restore();
-	};
-
 	const hex = (data: Float32Array, i: number, highlight: boolean) => {
 		const o = i * STRIDE;
 		const [cx, cy, lift] = data.subarray(o, o + 3);
@@ -1137,10 +1041,6 @@ export function fallback(canvas: HTMLCanvasElement): Renderer {
 		if (hostile) {
 			context.fillStyle = css(MAP.hostile, 0.3);
 			context.fill();
-		}
-		if (variants & flag('mine')) {
-			mine(cx, cy - lift, [...data.subarray(o + 3, o + 6)].map((c) => c * 255), data[o + 17] & 63);
-			path(CORNERS.map(([x, y]) => [cx + x, cy + y - lift]));
 		}
 		if (variants & flag('beach')) {
 			const sand = BASES.sand.flat;

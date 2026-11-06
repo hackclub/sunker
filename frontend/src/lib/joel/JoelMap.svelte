@@ -35,7 +35,7 @@
 		onpick?: (row: number, col: number) => void;
 	} = $props();
 
-	const TINTS: Record<string, number> = { forest: 0.45, farmland: 0.4, houses: 0.45, buildings: 0.55, mountain: 0.55, mine: 0.55, highway: 0.35, cactus: 0.2 };
+	const TINTS: Record<string, number> = { forest: 0.45, farmland: 0.4, houses: 0.45, buildings: 0.55, mountain: 0.55, highway: 0.35, cactus: 0.2 };
 
 	let width = $state(0);
 	let height = $state(0);

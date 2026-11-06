@@ -1,4 +1,5 @@
 use crate::auth;
+use actix_web::cookie::Cookie;
 use actix_web::web::{Bytes, BytesMut};
 use actix_web::{HttpRequest, HttpResponse, delete, get, patch, post, put, web};
 use futures_util::StreamExt;
@@ -17,7 +18,8 @@ const SCREENSHOT_STORE_LIMIT: usize = 256 * 1024 * 1024;
 const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 const PROJECT: &str = "jsonb_build_object(
-    'id', p.id, 'contract', c.name, 'ring', c.ring, 'name', p.name, 'description', p.description,
+    'id', p.id, 'contract', c.name, 'ring', c.ring, 'criteria', c.criteria, 'resources', c.resources,
+    'criteria_ticked', p.criteria_ticked, 'name', p.name, 'description', p.description,
     'repo_url', p.repo_url, 'screenshot_url', p.screenshot_url, 'hackatime_projects', p.hackatime_projects
 )";
 
@@ -44,7 +46,7 @@ pub async fn list(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
         };
         sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT coalesce(jsonb_agg({PROJECT} ORDER BY p.created_at DESC), '[]')
-             FROM project p JOIN contract c ON c.slug = p.contract_slug
+             FROM project p LEFT JOIN contract c ON c.slug = p.contract_slug
              WHERE p.user_id = $1 AND p.deleted_at IS NULL"
         )))
         .bind(user)
@@ -62,14 +64,14 @@ pub async fn list(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
 
 #[post("/api/projects")]
 pub async fn create(req: HttpRequest, body: web::Json<Value>, pool: web::Data<PgPool>) -> HttpResponse {
-    let contract = body["contract"].as_str().unwrap_or_default();
+    let contract = body["contract"].as_str();
     let result: sqlx::Result<Option<Option<i32>>> = async {
         let Some(user) = auth::user_id(&req, &pool).await? else {
             return Ok(None);
         };
         sqlx::query_scalar(
             "INSERT INTO project (user_id, contract_slug, name)
-             SELECT $1, slug, '' FROM contract WHERE slug = $2 AND deleted_at IS NULL
+             SELECT $1, $2::text, '' WHERE $2::text IS NULL OR EXISTS (SELECT 1 FROM contract WHERE slug = $2 AND deleted_at IS NULL)
              RETURNING id",
         )
         .bind(user)
@@ -160,9 +162,20 @@ pub async fn save(req: HttpRequest, id: web::Path<i32>, body: web::Json<Value>, 
                     .collect::<Result<Vec<_>, _>>()?,
             ),
         };
-        Ok::<_, String>((name, description, repo_url, hackatime))
+        let ticked = match body.get("criteria_ticked") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_array()
+                    .ok_or("Ticked criteria must be a list")?
+                    .iter()
+                    .map(|index| index.as_i64().and_then(|index| i16::try_from(index).ok()).filter(|index| *index >= 0).ok_or("Ticked criteria must be positions"))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        };
+        Ok::<_, String>((name, description, repo_url, hackatime, ticked))
     })();
-    let (name, description, repo_url, hackatime) = match parsed {
+    let (name, description, repo_url, hackatime, ticked) = match parsed {
         Ok(parsed) => parsed,
         Err(message) => return HttpResponse::BadRequest().body(message),
     };
@@ -199,6 +212,7 @@ pub async fn save(req: HttpRequest, id: web::Path<i32>, body: web::Json<Value>, 
                  description = coalesce($3, description),
                  repo_url = CASE WHEN $4 THEN NULLIF($5, '') ELSE repo_url END,
                  hackatime_projects = coalesce($6, hackatime_projects),
+                 criteria_ticked = coalesce($8, criteria_ticked),
                  updated_at = now()
              WHERE id = $1 AND user_id = $7 AND deleted_at IS NULL",
         )
@@ -209,6 +223,7 @@ pub async fn save(req: HttpRequest, id: web::Path<i32>, body: web::Json<Value>, 
         .bind(repo_url)
         .bind(hackatime)
         .bind(user)
+        .bind(ticked)
         .execute(pool.get_ref())
         .await?;
         Ok(HttpResponse::NoContent().finish())
@@ -321,6 +336,32 @@ pub async fn hackatime_list(req: HttpRequest, pool: web::Data<PgPool>) -> HttpRe
     }
     .await;
     result.unwrap_or_else(|e| failed("loading Hackatime projects", e))
+}
+
+#[post("/api/hackatime/unlink")]
+pub async fn unlink(req: HttpRequest, pool: web::Data<PgPool>) -> HttpResponse {
+    let result: sqlx::Result<bool> = async {
+        let Some(user) = auth::user_id(&req, &pool).await? else {
+            return Ok(false);
+        };
+        sqlx::query("UPDATE \"user\" SET htme_id = NULL, htme_trust_level = NULL, htme_linked_at = NULL WHERE id = $1")
+            .bind(user)
+            .execute(pool.get_ref())
+            .await?;
+        Ok(true)
+    }
+    .await;
+    match result {
+        Ok(true) => {
+            let mut response = HttpResponse::NoContent().finish();
+            let mut cookie = Cookie::new(login::TOKEN_COOKIE, "");
+            cookie.set_path("/");
+            let _ = response.add_removal_cookie(&cookie);
+            response
+        }
+        Ok(false) => HttpResponse::Unauthorized().finish(),
+        Err(e) => failed("unlinking Hackatime", e),
+    }
 }
 
 #[get("/hackatime/login")]
