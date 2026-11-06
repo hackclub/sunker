@@ -26,6 +26,7 @@
 	const OVERLAP = 64;
 	const spots = new SvelteMap<number, Spot>();
 	let width = $state(0);
+	let crowd: HTMLElement;
 
 	function point(angle: number): Point {
 		if (shape) return horseshoe(shape, angle);
@@ -157,6 +158,10 @@
 		});
 	});
 
+	function settle() {
+		for (const node of crowd.children) for (const animation of node.getAnimations()) animation.finish();
+	}
+
 	function walk(node: HTMLElement) {
 		if (!ready) return { duration: 0 };
 		const distance = innerWidth - node.getBoundingClientRect().left + 20;
@@ -175,7 +180,9 @@
 	}
 </script>
 
-<div class="crowd" class:upright={!!shape} bind:clientWidth={width}>
+<svelte:window onresize={settle} />
+
+<div class="crowd" class:upright={!!shape} bind:clientWidth={width} bind:this={crowd}>
 	{#each people as person (person.id)}
 		{@const spot = spots.get(person.id)!}
 		<button

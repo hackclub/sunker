@@ -137,7 +137,7 @@ function level(tiles: PlacedTile[], width: number, height: number, area: Rect): 
 
 export function stage(tiles: PlacedTile[], width: number, height: number, top: number, bottom: number, hud: number, portrait: boolean): Stage {
 	if (!portrait) return { pose: flat(tiles, width, height), wall: height / 3, box: null, unit: 0, crowd: null, guide: null };
-	const length = Math.round(width * SIDE);
+	const length = Math.round(Math.min(width * SIDE, 380));
 	const unit = length / SHARE;
 	const person = Math.max(44, Math.min(length * 0.2, 76));
 	const depth = person * 0.45;

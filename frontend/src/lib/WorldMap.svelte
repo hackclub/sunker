@@ -586,7 +586,8 @@
 			const t = Math.min(1, (now - start) / GLIDE);
 			const e = 1 - (1 - t) ** 3;
 			zoom = from + (target - from) * e;
-			focus = confine(base, tiles, innerWidth, innerHeight, zoom, [origin[0] + (goal[0] - origin[0]) * e, origin[1] + (goal[1] - origin[1]) * e], rest);
+			const point: [number, number] = [origin[0] + (goal[0] - origin[0]) * e, origin[1] + (goal[1] - origin[1]) * e];
+			focus = table ? point : confine(base, tiles, innerWidth, innerHeight, zoom, point, rest);
 			if (t < 1) gliding = requestAnimationFrame(step);
 		};
 		gliding = requestAnimationFrame(step);
@@ -728,7 +729,7 @@
 		const limit = deepest;
 		untrack(() => {
 			zoom = Math.min(zoom, limit);
-			if (focus) focus = confine(fit, tiles, innerWidth, innerHeight, zoom, focus, rest);
+			if (focus && !table) focus = confine(fit, tiles, innerWidth, innerHeight, zoom, focus, rest);
 		});
 	});
 
