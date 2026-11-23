@@ -155,6 +155,7 @@
 
 	const PLANKS = ['plank', 'plank2', 'plank3'];
 	const BUILDINGS = ['building1', 'building2'];
+	const BUILDING_WIDTH = 64;
 	const SCALE = 1 / 768;
 	const WIDTH = 128;
 	const SPACING = 96;
@@ -443,7 +444,7 @@
 		const skyline = [];
 		for (let i = 0, x = -unit * 32; x < backdrop.width + unit * 32; i++) {
 			const image = buildings[Math.floor(random(i * 3) * buildings.length)];
-			const size = unit * (0.5 + random(i * 3 + 1) * 0.7);
+			const size = (unit * (0.5 + random(i * 3 + 1) * 0.7) * BUILDING_WIDTH) / image.width;
 			skyline.push({ image, size, x });
 			x += image.width * size * (0.4 + random(i * 3 + 2) * 0.5);
 		}

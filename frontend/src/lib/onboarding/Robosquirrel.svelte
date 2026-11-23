@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Spring } from 'svelte/motion';
-	import { image, rendering } from '#lib/styles.svelte.js';
+	import { image, rendering, styles } from '#lib/styles.svelte.js';
 
 	let { tilt = 0, mode = 'float', size, onclick }: { tilt?: number; mode?: 'float' | 'bob'; size: string; onclick?: () => void } = $props();
 
 	const turn = new Spring(0, { stiffness: 0.12, damping: 0.28 });
+	const head = $derived((styles.images['robosquirrel-head']?.width ?? 128) / (styles.images['robosquirrel-body']?.width ?? 256));
 	$effect(() => {
 		turn.target = tilt;
 	});
@@ -12,7 +13,7 @@
 
 {#snippet parts()}
 	<img class="body" src={image('robosquirrel-body')} alt="" style:image-rendering={rendering('robosquirrel-body')} />
-	<span class="neck" class:bob={mode === 'bob'}>
+	<span class="neck" class:bob={mode === 'bob'} style:--head={head}>
 		<img class="head" src={image('robosquirrel-head')} alt="" style:image-rendering={rendering('robosquirrel-head')} style:transform="rotate({turn.current}deg)" />
 	</span>
 {/snippet}
@@ -54,9 +55,9 @@
 
 	.neck {
 		position: absolute;
-		top: -13%;
-		left: 51%;
-		width: 50%;
+		top: calc(41% - var(--head) * 90%);
+		left: calc(65% - var(--head) * 50%);
+		width: calc(var(--head) * 100%);
 		aspect-ratio: 1;
 	}
 
@@ -67,7 +68,7 @@
 	.head {
 		inset: 0;
 		width: 100%;
-		transform-origin: 50% 87.5%;
+		transform-origin: 50% 90%;
 	}
 
 	@keyframes float {
