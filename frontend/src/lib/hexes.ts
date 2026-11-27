@@ -2,7 +2,7 @@ import { BASES, LIBRARY, NAMES, NOISE } from '#lib/bases.js';
 import { MAP, css, rgb, vec3 } from '#lib/colors.js';
 import { CORNERS, FRONT, HEIGHT, WIDTH } from '#lib/map.js';
 import { perlin } from '#lib/noise.js';
-import { image, smooth, styles } from '#lib/styles.svelte.js';
+import { image, smooth, styles, uploaded } from '#lib/styles.svelte.js';
 
 export const STRIDE = 18;
 export const THIN = 1;
@@ -18,17 +18,30 @@ export const RANGE_STRIDE = 8;
 const SPRITES = [
 	{ name: 'building1', size: [64, 128], anchor: [28.5, 128], unit: 0.016, flat: false },
 	{ name: 'building2', size: [64, 128], anchor: [33, 128], unit: 0.016, flat: false },
+	{ name: 'building3', size: [64, 128], anchor: [32, 128], unit: 0.016, flat: false },
+	{ name: 'building4', size: [64, 128], anchor: [32, 128], unit: 0.016, flat: false },
+	{ name: 'building5', size: [64, 128], anchor: [32, 128], unit: 0.016, flat: false },
 	{ name: 'house1', size: [256, 256], anchor: [132, 234], unit: 0.003, flat: false },
 	{ name: 'house2', size: [256, 256], anchor: [125, 218], unit: 0.003, flat: false },
+	{ name: 'house3', size: [256, 256], anchor: [126, 228], unit: 0.003, flat: false },
+	{ name: 'house4', size: [256, 256], anchor: [126, 234], unit: 0.003, flat: false },
+	{ name: 'house5', size: [256, 256], anchor: [128, 240], unit: 0.003, flat: false },
 	{ name: 'tree1', size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
+	{ name: 'tree2', size: [128, 128], anchor: [68, 127], unit: 0.0034, flat: false },
+	{ name: 'tree3', size: [128, 128], anchor: [60, 125], unit: 0.0034, flat: false },
 	{ name: 'cactus', size: [128, 128], anchor: [63, 127], unit: 0.004, flat: false },
 	{ name: 'chunker', size: [128, 128], anchor: [66, 124], unit: 0.011, flat: false },
 	{ name: 'crawler', size: [128, 128], anchor: [62, 112], unit: 0.0055, flat: false },
 	{ name: 'hopper', size: [128, 128], anchor: [66, 110], unit: 0.0055, flat: false },
 	{ name: 'outpost', size: [128, 128], anchor: [62, 102], unit: 0.016, flat: false }
 ] as const;
-export const sprite = (name: (typeof SPRITES)[number]['name']) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
+type Sprite = (typeof SPRITES)[number]['name'];
+export const sprite = (name: Sprite) => 2 + SPRITES.findIndex((sprite) => sprite.name === name);
+export const variety = (names: Sprite[]) => uploaded(names).map(sprite);
 const TREE = sprite('tree1');
+const LAST_TREE = sprite('tree3');
+const GUTTER = 32;
+const FOG_UNIT = 1;
 const OUTPOST = sprite('outpost');
 
 const VARIANTS = ['highway', 'street', 'beach', 'farmland', 'sunker', 'origin'];
@@ -488,7 +501,9 @@ in vec2 v_uv;
 flat in float v_seed;
 flat in float v_kind;
 uniform float u_shadow;
-uniform sampler2D u_sprites[${SPRITES.length}];
+uniform sampler2D u_atlas;
+uniform vec4 u_rects[${SPRITES.length}];
+const bool SPRITE_SMOOTH[${SPRITES.length}] = bool[${SPRITES.length}](${SPRITES.map(({ name }) => smooth(name))});
 out vec4 color;
 ${LIBRARY}
 float cross2(vec2 a, vec2 b) {
@@ -526,8 +541,12 @@ void main() {
 	if (v_kind > 1.5) {
 		int sprite = int(v_kind + 0.5) - 2;
 		vec2 uv = v_uv;
-		if (sprite == ${TREE - 2}) uv.x += sin(u_time * 1.1 + v_seed * 6.2831853) * 0.012 * (1.0 - uv.y);
-${SPRITES.map((_, k) => `		if (sprite == ${k}) color = texture(u_sprites[${k}], uv);`).join('\n')}
+		if (sprite >= ${TREE - 2} && sprite <= ${LAST_TREE - 2}) uv.x += sin(u_time * 1.1 + v_seed * 6.2831853) * 0.012 * (1.0 - uv.y);
+		vec4 rect = u_rects[sprite];
+		vec2 size = rect.zw * vec2(textureSize(u_atlas, 0));
+		vec2 at = rect.xy + clamp(uv, 0.5 / size, 1.0 - 0.5 / size) * rect.zw;
+		vec2 texel = SPRITE_SMOOTH[sprite] ? at : rect.xy + (floor(clamp(uv, 0.0, 0.9999) * size) + 0.5) / size * rect.zw;
+		color = textureGrad(u_atlas, texel, dFdx(at), dFdy(at));
 		return;
 	}
 	color = rock(v_offset, v_seed);
@@ -649,6 +668,24 @@ export function link(gl: WebGL2RenderingContext, vertex: string, fragment: strin
 export const look = () =>
 	[FRAGMENT(), TREE_VERTEX(), TREE_FRAGMENT(), RAMP_FRAGMENT(), FOG_FRAGMENT(), MAP.background, ...SPRITES.map(({ name }) => `${image(name)} ${smooth(name)}`)].join('\n');
 
+function arrange(shapes: { size: number[] }[], limit: number) {
+	const width = Math.min(limit, 4096);
+	const order = shapes.map((_, k) => k).sort((a, b) => shapes[b].size[1] - shapes[a].size[1]);
+	const cell = (n: number) => Math.ceil((n + GUTTER) / GUTTER) * GUTTER;
+	for (let scale = 1; ; scale *= 0.75) {
+		const rects: [number, number, number, number][] = [];
+		let [x, y, row] = [0, 0, 0];
+		for (const k of order) {
+			const [w, h] = shapes[k].size.map((n) => Math.max(1, Math.round(n * scale)));
+			if (x && x + cell(w) > width) [x, y, row] = [0, y + row, 0];
+			rects[k] = [x, y, w, h];
+			x += cell(w);
+			row = Math.max(row, cell(h));
+		}
+		if (y + row <= limit && rects.every(([x, , w]) => x + w <= width)) return { width, height: y + row, rects };
+	}
+}
+
 export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
 	if (!gl) return null;
@@ -733,8 +770,8 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	attribute('a_corner', 2, 2, 0, 0, mist);
 	const clouds = gl.createTexture();
 	gl.useProgram(mist);
-	gl.uniform1i(gl.getUniformLocation(mist, 'u_fog'), SPRITES.length);
-	gl.activeTexture(gl.TEXTURE0 + SPRITES.length);
+	gl.uniform1i(gl.getUniformLocation(mist, 'u_fog'), FOG_UNIT);
+	gl.activeTexture(gl.TEXTURE0 + FOG_UNIT);
 	gl.bindTexture(gl.TEXTURE_2D, clouds);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -744,25 +781,39 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 	gl.useProgram(program);
 	gl.uniform2f(gl.getUniformLocation(program, 'u_seed'), Math.random() * 100, Math.random() * 100);
 	gl.useProgram(forest);
-	gl.uniform1iv(gl.getUniformLocation(forest, 'u_sprites'), SPRITES.map((_, k) => k));
-	SPRITES.forEach(({ name }, k) => {
-		const texture = gl.createTexture();
-		gl.activeTexture(gl.TEXTURE0 + k);
-		gl.bindTexture(gl.TEXTURE_2D, texture);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
-		const sprite = new Image();
-		sprite.onload = () => {
-			gl.activeTexture(gl.TEXTURE0 + k);
-			gl.bindTexture(gl.TEXTURE_2D, texture);
-			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sprite);
-			gl.generateMipmap(gl.TEXTURE_2D);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, smooth(name) ? gl.LINEAR : gl.NEAREST);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-			self.draw();
-		};
-		sprite.src = image(name);
+	const sheet = arrange(SPRITES.map(measured), gl.getParameter(gl.MAX_TEXTURE_SIZE));
+	gl.uniform1i(gl.getUniformLocation(forest, 'u_atlas'), 0);
+	gl.uniform4fv(gl.getUniformLocation(forest, 'u_rects'), sheet.rects.flatMap(([x, y, w, h]) => [x / sheet.width, y / sheet.height, w / sheet.width, h / sheet.height]));
+	const atlas = gl.createTexture();
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, atlas);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+	Promise.allSettled(
+		SPRITES.map(({ name }) => {
+			const sprite = new Image();
+			sprite.src = image(name);
+			return sprite.decode().then(() => sprite);
+		})
+	).then((loaded) => {
+		const board = document.createElement('canvas');
+		board.width = sheet.width;
+		board.height = sheet.height;
+		const context = board.getContext('2d')!;
+		loaded.forEach((result, k) => {
+			if (result.status !== 'fulfilled') return;
+			context.imageSmoothingEnabled = smooth(SPRITES[k].name);
+			context.drawImage(result.value, ...sheet.rects[k]);
+		});
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, atlas);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, board);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, Math.log2(GUTTER));
+		gl.generateMipmap(gl.TEXTURE_2D);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		self.draw();
 	});
 
 	gl.enable(gl.BLEND);
@@ -824,7 +875,7 @@ export function renderer(canvas: HTMLCanvasElement): Renderer | null {
 			const bytes = new Uint8Array(rows * cols);
 			for (const { row, col, density } of cells) bytes[(row - top) * cols + col - left] = Math.round(density * 255);
 			gl.useProgram(mist);
-			gl.activeTexture(gl.TEXTURE0 + SPRITES.length);
+			gl.activeTexture(gl.TEXTURE0 + FOG_UNIT);
 			gl.bindTexture(gl.TEXTURE_2D, clouds);
 			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 			gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, cols, rows, 0, gl.RED, gl.UNSIGNED_BYTE, bytes);

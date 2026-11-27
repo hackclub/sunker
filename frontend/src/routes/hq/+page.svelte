@@ -1,7 +1,7 @@
 <script lang="ts">
 	import SidePanel, { DIALOG_WIDTH, SPLIT, offset } from '#lib/SidePanel.svelte';
 	import { PALETTE } from '#lib/colors.js';
-	import { image, rendering, smooth } from '#lib/styles.svelte.js';
+	import { image, rendering, smooth, uploaded } from '#lib/styles.svelte.js';
 	import WorldMap from '#lib/WorldMap.svelte';
 	import { params, update } from '#lib/url.svelte.js';
 	import { page } from '$app/state';
@@ -154,7 +154,7 @@
 	}
 
 	const PLANKS = ['plank', 'plank2', 'plank3'];
-	const BUILDINGS = ['building1', 'building2'];
+	const BUILDINGS = ['building1', 'building2', 'building3', 'building4', 'building5'];
 	const BUILDING_WIDTH = 64;
 	const SCALE = 1 / 768;
 	const WIDTH = 128;
@@ -232,6 +232,7 @@
 	let images: HTMLImageElement[] = $state([]);
 	const blend = $derived(PLANKS.every(smooth));
 	let buildings: HTMLImageElement[] = $state([]);
+	const towers = $derived(uploaded(BUILDINGS));
 
 	function load(src: string) {
 		const image = new Image();
@@ -351,7 +352,7 @@
 
 	$effect(() => {
 		settle(PLANKS.map(image)).then((loaded) => (images = loaded));
-		settle(BUILDINGS.map(image)).then((loaded) => (buildings = loaded));
+		settle(towers.map(image)).then((loaded) => (buildings = loaded));
 	});
 
 	$effect(() => {
@@ -451,7 +452,7 @@
 		for (const { image, size, x } of skyline.sort((a, b) => a.size - b.size)) {
 			const left = snap(x);
 			const top = snap(wall - image.height * size);
-			backdropContext.imageSmoothingEnabled = smooth(BUILDINGS[buildings.indexOf(image)]);
+			backdropContext.imageSmoothingEnabled = smooth(towers[buildings.indexOf(image)]);
 			backdropContext.drawImage(image, left, top, snap(left + image.width * size) - left, wall - top);
 		}
 

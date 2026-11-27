@@ -42,6 +42,11 @@ export const image = (slug: string) => {
 	return `/api/styling/images/${slug}${entry ? `?v=${entry.id}` : ''}`;
 };
 
+export const uploaded = <T extends string>(slugs: T[]) => {
+	const found = slugs.filter((slug) => styles.images[slug]);
+	return found.length ? found : slugs.slice(0, 1);
+};
+
 export const smooth = (slug: string) => styles.images[slug]?.smooth ?? false;
 
 export const rendering = (slug: string) => (smooth(slug) ? 'auto' : 'pixelated');

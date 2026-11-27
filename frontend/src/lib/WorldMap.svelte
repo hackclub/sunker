@@ -2,7 +2,7 @@
 	import { BASES, NAMES } from '#lib/bases.js';
 	import { amount, describe } from '#lib/effects.js';
 	import { MAP, legible, rgb } from '#lib/colors.js';
-	import { CONTOUR, FOG_STRIDE, HIDDEN, MARK, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, look, pack, renderer, sprite, type Renderer } from '#lib/hexes.js';
+	import { CONTOUR, FOG_STRIDE, HIDDEN, MARK, RAMP_STRIDE, ROCK, STRIDE, THIN, TREE_STRIDE, fallback, look, pack, renderer, sprite, variety, type Renderer } from '#lib/hexes.js';
 	import { raise } from '#lib/range.js';
 	import { CORNERS, ENEMIES, WIDTH, center, enemyName, neighbours, place, type Enemy, type Force, type HexMap, type PlacedTile, type Territory } from '#lib/map.js';
 	import { BACKGROUND, FLIGHT, LIFT, PERSPECTIVE, TILT, aim, confine, frame, grid, middle, projector, unprojector, type Plane } from '#lib/view.js';
@@ -383,6 +383,9 @@
 	const range = $derived(raise(tiles, placed));
 
 	const trees = $derived.by(() => {
+		const buildings = variety(['building1', 'building2', 'building3', 'building4', 'building5']);
+		const houses = variety(['house1', 'house2', 'house3', 'house4', 'house5']);
+		const forest = variety(['tree1', 'tree2', 'tree3']);
 		const found: number[][] = [];
 		const pinned: number[][] = [];
 		for (const { tile, row, col, x, y } of tiles) {
@@ -405,12 +408,12 @@
 				const spread = enemies.length > 1 ? 0.35 : 0;
 				found.push([x + Math.cos(angle) * spread, y + Math.sin(angle) * spread * 0.6, tile.height * LIFT, 0.9 + hash(col, row, 51 + k) * 0.3, 0, sprite(enemy), y]);
 			});
-			const kinds = tile.variants.includes('buildings') ? [sprite('building1'), sprite('building2')] : tile.variants.includes('houses') ? [sprite('house1'), sprite('house2')] : null;
+			const kinds = tile.variants.includes('buildings') ? buildings : tile.variants.includes('houses') ? houses : null;
 			if (kinds) {
 				const count = 2 + Math.floor(hash(col, row, 13) * 2);
 				for (let k = 0; k < count; k++) {
 					const along = (k + 0.5) / count - 0.5 + (hash(col, row, 14 + k) - 0.5) * 0.15;
-					found.push([x + along * 1.2, y + 0.25 + hash(col, row, 17 + k) * 0.2, tile.height * LIFT, 0.85 + hash(col, row, 20 + k) * 0.3, 0, kinds[hash(col, row, 23 + k) < 0.5 ? 0 : 1], y]);
+					found.push([x + along * 1.2, y + 0.25 + hash(col, row, 17 + k) * 0.2, tile.height * LIFT, 0.85 + hash(col, row, 20 + k) * 0.3, 0, kinds[Math.floor(hash(col, row, 23 + k) * kinds.length)], y]);
 				}
 			}
 			if (!tile.variants.includes('forest')) continue;
@@ -421,7 +424,7 @@
 					const ty = (row + 0.15 + hash(col, row, 2) * 0.7) * GROVE;
 					const [dx, dy] = [Math.abs(tx - x), Math.abs(ty - y)];
 					if (dx > WIDTH / 2 || dx * 0.5 + dy * WIDTH / 2 > WIDTH / 2) continue;
-					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), sprite('tree1'), y]);
+					found.push([tx, ty, tile.height * LIFT, 0.8 + hash(col, row, 3) * 0.4, hash(col, row, 4), forest[Math.floor(hash(col, row, 12) * forest.length)], y]);
 				}
 			}
 		}

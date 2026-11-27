@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { colour, css } from '#lib/colors.js';
-	import { image, smooth } from '#lib/styles.svelte.js';
+	import { image, smooth, uploaded } from '#lib/styles.svelte.js';
 
 	const PIXEL = 3;
 	const EYE = 1.7;
 	const ROAD = 8;
 	const NEAR = 0.6;
 	const FAR = 420;
-	const BUILDINGS = ['building1', 'building2'];
+	const BUILDINGS = ['building1', 'building2', 'building3', 'building4', 'building5'];
 	const STOREY = 9;
 	const BLUR = 10;
 
@@ -15,6 +15,7 @@
 	let innerHeight = $state(0);
 	let canvas: HTMLCanvasElement;
 	let sprites = $state<HTMLImageElement[]>([]);
+	const kinds = $derived(uploaded(BUILDINGS));
 
 	function random(n: number) {
 		const h = Math.imul(0x5eed ^ Math.imul(n + 1, 2246822519), 2654435761) >>> 0;
@@ -23,7 +24,7 @@
 
 	$effect(() => {
 		Promise.all(
-			BUILDINGS.map((slug) => {
+			kinds.map((slug) => {
 				const sprite = new Image();
 				sprite.src = image(slug);
 				return sprite.decode().then(() => sprite);
@@ -174,7 +175,7 @@
 			tinted.fillRect(0, 0, tint.width, tint.height);
 			tinted.globalCompositeOperation = 'source-over';
 			const flat = Math.max(body.roofs[-1], body.roofs[1]) - body.top;
-			context.imageSmoothingEnabled = smooth(BUILDINGS[sprites.indexOf(sprite)]);
+			context.imageSmoothingEnabled = smooth(kinds[sprites.indexOf(sprite)]);
 			const [start, end] = [across(x, z), across(x, far)].sort((a, b) => a - b);
 			for (let column = Math.floor(start); column < Math.ceil(end); column++) {
 				const depthAt = (focal * x) / (column + 0.5 - w / 2);
